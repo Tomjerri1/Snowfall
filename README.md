@@ -2,8 +2,6 @@
 
 A lightweight **Windows desktop overlay** that makes snow fall over your screen. Snowflakes land on the top edges of your open windows, on the taskbar and on the bottom of the screen, and build up into drifts. The overlay is transparent and click-through, so you can keep working as usual.
 
-<!-- Add a screenshot or a short GIF here: docs/screenshot.png -->
-
 ## Features
 
 - Falling snow in several depth layers with a slowly changing wind.
