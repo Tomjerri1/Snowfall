@@ -13,7 +13,7 @@ fn config_path() -> Option<PathBuf> {
 }
 
 /// Current values of all persisted settings, used to detect changes.
-pub fn snapshot(state: &AppState) -> [usize; 8] {
+pub fn snapshot(state: &AppState) -> [usize; 9] {
     [
         state.target_flakes.load(Ordering::Relaxed),
         state.target_fps.load(Ordering::Relaxed),
@@ -23,6 +23,7 @@ pub fn snapshot(state: &AppState) -> [usize; 8] {
         state.acc_dock.load(Ordering::Relaxed) as usize,
         state.acc_ground.load(Ordering::Relaxed) as usize,
         state.mouse_flakes.load(Ordering::Relaxed) as usize,
+        state.strength.load(Ordering::Relaxed),
     ]
 }
 
@@ -41,6 +42,7 @@ pub fn load(state: &AppState) {
                 }
             }
             "opacity" => state.opacity.store(v.clamp(10, 100), Ordering::Relaxed),
+            "strength" => state.strength.store(v.clamp(25, 200), Ordering::Relaxed),
             "height_limit" => state.height_limit.store(v != 0, Ordering::Relaxed),
             "acc_windows" => state.acc_windows.store(v != 0, Ordering::Relaxed),
             "acc_dock" => state.acc_dock.store(v != 0, Ordering::Relaxed),
@@ -59,8 +61,8 @@ pub fn save(state: &AppState) {
     }
     let s = snapshot(state);
     let text = format!(
-        "flakes={}\nfps={}\nopacity={}\nheight_limit={}\nacc_windows={}\nacc_dock={}\nacc_ground={}\nmouse_flakes={}\n",
-        s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]
+        "flakes={}\nfps={}\nopacity={}\nheight_limit={}\nacc_windows={}\nacc_dock={}\nacc_ground={}\nmouse_flakes={}\nstrength={}\n",
+        s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]
     );
     let tmp = path.with_extension("tmp");
     if std::fs::write(&tmp, text).is_ok() {

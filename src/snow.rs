@@ -15,6 +15,8 @@ const MAX_SLOPE: f32 = 2.2;
 const ACCUMULATION: f32 = 1.8;
 const EDGE_ZONE: f32 = 28.0;
 const PLOW_FRAC: f32 = 0.4;
+const CLEAR_FRONT_SPEED: f32 = 1000.0;
+const CLEAR_GUST_WIND: f32 = 650.0;
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
@@ -280,8 +282,15 @@ pub struct Snow {
     pub flake_opacity: f32,
     pub seeded: bool,
     pub height_limit: bool,
+    pub strength: f32,
     pub brush_diag: Option<BrushDiagnostics>,
     pub window_rects: Vec<(isize, tiny_skia::Rect)>,
+    pub clearing: bool,
+    pub clear_front: f32,
+    pub clear_gust: f32,
+    pub clear_hold: bool,
+    pub clear_hold_time: f32,
+    pub refill_from_top: bool,
 }
 
 impl Snow {
@@ -359,8 +368,15 @@ impl Snow {
             flake_opacity: 1.0,
             seeded: false,
             height_limit: true,
+            strength: 1.0,
             brush_diag: None,
             window_rects: Vec::new(),
+            clearing: false,
+            clear_front: 0.0,
+            clear_gust: 0.0,
+            clear_hold: false,
+            clear_hold_time: 0.0,
+            refill_from_top: false,
         }
     }
 
@@ -419,9 +435,17 @@ impl Snow {
         }
     }
 
-    pub fn clear_all(&mut self) {
-        self.piles.clear();
-        self.flakes.clear();
+    pub fn start_clear(&mut self) {
+        self.clearing = true;
+        self.clear_front = 0.0;
+        self.clear_gust = 1.0;
+        self.clear_hold = true;
+        self.clear_hold_time = 0.0;
+        for f in self.flakes.iter_mut() {
+            if !f.extra {
+                f.fade_target = 0.0;
+            }
+        }
     }
 
     pub fn seed_initial_piles(&mut self) {
@@ -1093,8 +1117,15 @@ impl Snow {
         let mut rng = rand::thread_rng();
         self.wind_time += dt;
         let height_limit = self.height_limit;
+        let strength = self.strength;
 
-        let global_wind = (self.wind_time * 0.6).sin() * 20.0 + (self.wind_time * 0.25).sin() * 35.0;
+        let mut global_wind = (self.wind_time * 0.6).sin() * 20.0 + (self.wind_time * 0.25).sin() * 35.0;
+        if self.clearing || self.clear_hold {
+            self.clear_gust = 1.0;
+        } else if self.clear_gust > 0.0 {
+            self.clear_gust = (self.clear_gust - dt / 0.8).max(0.0);
+        }
+        global_wind += self.clear_gust * CLEAR_GUST_WIND;
 
         for (_, data) in self.owner_data.iter_mut() {
             data.visible_intervals.clear();
@@ -1247,6 +1278,74 @@ impl Snow {
             }
         }
 
+        if self.clearing {
+            self.clear_front += CLEAR_FRONT_SPEED * dt;
+            let front = self.clear_front;
+            let extra_count = self.flakes.iter().filter(|f| f.extra).count();
+            let mut new_flakes = Vec::new();
+            for (_, pile) in self.piles.iter_mut() {
+                let mut changed = false;
+                for i in 0..pile.heights.len() {
+                    let h = pile.heights[i];
+                    if h <= 0.0 {
+                        continue;
+                    }
+                    let col_x = pile.x_start + i as f32 * 2.0 + 1.0;
+                    if col_x > front {
+                        continue;
+                    }
+                    pile.heights[i] = 0.0;
+                    changed = true;
+                    if h > 0.5 && i % 2 == 0 && (extra_count + new_flakes.len()) < 1500 {
+                        let n = if h > 10.0 { 2 } else { 1 };
+                        for _ in 0..n {
+                            let depth = rng.gen_range(0.5..0.9);
+                            let r = rng.gen_range(1.5..3.5);
+                            new_flakes.push(Flake {
+                                x: col_x,
+                                y: rng.gen_range((pile.y - h)..pile.y),
+                                vx: rng.gen_range(450.0..900.0),
+                                vy: rng.gen_range(-30.0..-5.0),
+                                bvx: 0.0,
+                                bvy: 0.0,
+                                r,
+                                alpha: 0.3 + depth * 0.65,
+                                sway_phase: rng.gen_range(0.0..std::f32::consts::TAU),
+                                depth,
+                                bucket_idx: Self::get_bucket_idx(r),
+                                fade: 1.0,
+                                fade_target: 1.0,
+                                extra: true,
+                                ballistic: 0.0,
+                                skip_owner: 0,
+                            });
+                        }
+                    }
+                }
+                if changed {
+                    pile.dirty = true;
+                }
+            }
+            self.flakes.extend(new_flakes);
+            if self.clear_front > self.width + 200.0 {
+                self.clearing = false;
+                self.clear_front = 0.0;
+            }
+        }
+
+        if self.clear_hold && !self.clearing {
+            self.clear_hold_time += dt;
+            let extra_left = self.flakes.iter().any(|f| f.extra);
+            if !extra_left || self.clear_hold_time > 8.0 {
+                self.clear_hold = false;
+                self.refill_from_top = true;
+            }
+        }
+        let hold = self.clear_hold;
+
+        let clear_gust = self.clear_gust;
+        let wind_time = self.wind_time;
+
         self.scratch_remove_indices.clear();
         let alive_count = self.flakes.iter().filter(|f| !f.extra && f.fade_target > 0.0).count();
         for (i, flake) in self.flakes.iter_mut().enumerate() {
@@ -1264,8 +1363,17 @@ impl Snow {
             flake.sway_phase += dt * 2.0;
             let sway = flake.sway_phase.sin() * (5.0 + flake.depth * 10.0);
             let effective_wind = global_wind * (0.5 + 0.5 * flake.depth);
-            flake.x += (flake.vx + effective_wind + sway + flake.bvx) * dt;
-            flake.y += (flake.vy + flake.bvy) * dt;
+            let mut swirl_x = 0.0f32;
+            let mut swirl_y = 0.0f32;
+            if clear_gust > 0.0 {
+                // each flake circles while being carried to the right; half of them rotate the other way
+                let dir = if flake.depth < 0.7 { 1.0 } else { -1.0 };
+                let ang = flake.sway_phase * 3.0 * dir;
+                swirl_x = ang.cos() * 220.0 * clear_gust;
+                swirl_y = (ang.sin() * 260.0 + (flake.x * 0.01 - wind_time * 5.0).sin() * 120.0) * clear_gust;
+            }
+            flake.x += (flake.vx * strength + (effective_wind + sway) * strength + flake.bvx + swirl_x) * dt;
+            flake.y += (flake.vy * strength + flake.bvy + swirl_y) * dt;
 
             if flake.extra && flake.ballistic > 0.0 {
                 flake.bvy += 520.0 * dt;
@@ -1284,7 +1392,7 @@ impl Snow {
             let mut landed = false;
             let mut land_seg_owner = None;
 
-            if flake.fade_target > 0.0 {
+            if flake.fade_target > 0.0 && !hold {
                 for seg in segments {
                     if flake.skip_owner != 0 && seg.owner == Some(flake.skip_owner) {
                         continue;
@@ -1357,7 +1465,7 @@ impl Snow {
 
                 if flake.extra {
                     self.scratch_remove_indices.push(i);
-                } else if alive_count <= self.target_flake_count {
+                } else if !hold && alive_count <= self.target_flake_count {
                     flake.y = -flake.r;
                     flake.x = rng.gen_range(0.0..self.width);
                     let depth = rng.gen_range(0.0..1.0);
@@ -1376,7 +1484,7 @@ impl Snow {
             } else if flake.x < -flake.r || flake.x > self.width + flake.r || flake.y > self.height + flake.r {
                 if flake.extra {
                     self.scratch_remove_indices.push(i);
-                } else if alive_count <= self.target_flake_count {
+                } else if !hold && alive_count <= self.target_flake_count {
                     flake.y = -flake.r;
                     flake.x = rng.gen_range(0.0..self.width);
                     let depth = rng.gen_range(0.0..1.0);
@@ -1421,7 +1529,7 @@ impl Snow {
 
         // 5. Intensity increase
         let mut current_alive = self.flakes.iter().filter(|f| !f.extra && f.fade_target > 0.0).count();
-        while current_alive < self.target_flake_count {
+        while !hold && current_alive < self.target_flake_count {
             let depth = rng.gen_range(0.0..1.0);
             let r = if depth < 0.5 { rng.gen_range(0.8..1.5) } else { rng.gen_range(2.5..4.0) };
             let bucket_idx = Self::get_bucket_idx(r);
@@ -1429,7 +1537,7 @@ impl Snow {
             let alpha = 0.3 + depth * 0.65;
             self.flakes.push(Flake {
                 x: rng.gen_range(0.0..self.width),
-                y: rng.gen_range((-0.1 * self.height)..self.height),
+                y: if self.refill_from_top { rng.gen_range((-0.4 * self.height)..0.0) } else { rng.gen_range((-0.1 * self.height)..self.height) },
                 vx: rng.gen_range(-10.0..10.0),
                 vy,
                 bvx: 0.0,
@@ -1446,6 +1554,9 @@ impl Snow {
                 skip_owner: 0,
             });
             current_alive += 1;
+        }
+        if !hold {
+            self.refill_from_top = false;
         }
         if self.flakes.len() > 6000 {
             self.flakes.drain(0..self.flakes.len() - 6000);

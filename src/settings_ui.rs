@@ -32,31 +32,33 @@ const MARGIN_X: i32 = 20;
 const TRACK_WIDTH: i32 = 300;
 const SLIDER1_TOP: i32 = 15;
 const SLIDER2_TOP: i32 = 80;
+const SLIDER3_TOP: i32 = 145;
 const ROW_HEIGHT: i32 = 55;
 const TRACK_HEIGHT: i32 = 6;
 const THUMB_SIZE: i32 = 16;
 
-const ACC_HEADER_TOP: i32 = 145;
-const TILES_TOP: i32 = 170;
+const ACC_HEADER_TOP: i32 = 210;
+const TILES_TOP: i32 = 235;
 const TILE_WIDTH: i32 = 90;
 const TILE_HEIGHT: i32 = 66;
 const TILE_GAP: i32 = 15;
 
-const SWITCH1_TOP: i32 = 250;
-const SWITCH2_TOP: i32 = 295;
+const SWITCH1_TOP: i32 = 315;
+const SWITCH2_TOP: i32 = 360;
 const SWITCH_ROW_HEIGHT: i32 = 35;
 const SWITCH_WIDTH: i32 = 44;
 const SWITCH_HEIGHT: i32 = 22;
 
-const FPS_TOP: i32 = 345;
-const BUTTON_TOP: i32 = 400;
+const FPS_TOP: i32 = 410;
+const BUTTON_TOP: i32 = 465;
 const CLIENT_WIDTH: i32 = 340;
-const CLIENT_HEIGHT: i32 = 455;
+const CLIENT_HEIGHT: i32 = 520;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SliderKind {
     Intensity,
     Opacity,
+    Strength,
 }
 
 struct SettingsData {
@@ -307,6 +309,9 @@ fn hit_test_slider(x: i32, y: i32) -> Option<SliderKind> {
         if y >= SLIDER2_TOP && y < SLIDER2_TOP + ROW_HEIGHT {
             return Some(SliderKind::Opacity);
         }
+        if y >= SLIDER3_TOP && y < SLIDER3_TOP + ROW_HEIGHT {
+            return Some(SliderKind::Strength);
+        }
     }
     None
 }
@@ -325,6 +330,10 @@ fn update_slider_from_mouse(data: &SettingsData, slider: SliderKind, x: i32) {
             let val = 10 + (ratio * 90.0).round() as usize;
             let val = val.clamp(10, 100);
             data.state.opacity.store(val, Ordering::Relaxed);
+        }
+        SliderKind::Strength => {
+            let val = 25 + (ratio * 175.0).round() as usize;
+            data.state.strength.store(val.clamp(25, 200), Ordering::Relaxed);
         }
     }
 }
@@ -547,7 +556,8 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
 
     // Draw Intensity slider
     let target_flakes = state.target_flakes.load(Ordering::Relaxed) as f32;
-    let intensity_str = format!("{}", target_flakes as usize);
+    let intensity_pct = ((target_flakes - 50.0) * 100.0 / 2950.0).round() as usize;
+    let intensity_str = format!("{}%", intensity_pct);
     draw_slider(
         hdc,
         "Intensity",
@@ -570,6 +580,11 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
         100.0,
         opacity,
     );
+
+    // Draw Strength slider
+    let strength = state.strength.load(Ordering::Relaxed) as f32;
+    let strength_str = format!("{}%", strength as usize);
+    draw_slider(hdc, "Strength", &strength_str, SLIDER3_TOP, 25.0, 200.0, strength);
 
     // Accumulate header
     let mut acc_header_rc = RECT { left: MARGIN_X, top: ACC_HEADER_TOP, right: MARGIN_X + TRACK_WIDTH, bottom: ACC_HEADER_TOP + 20 };

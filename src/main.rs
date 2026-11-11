@@ -191,7 +191,7 @@ fn main() {
         }
 
         if state.clear_requested.swap(false, Ordering::Relaxed) {
-            snow.clear_all();
+            snow.start_clear();
         }
 
         let moving_hwnd = tracker::get_moving_hwnd();
@@ -278,6 +278,7 @@ fn main() {
 
         snow.target_flake_count = state.target_flakes.load(Ordering::Relaxed);
         snow.height_limit = state.height_limit.load(Ordering::Relaxed);
+        snow.strength = state.strength.load(Ordering::Relaxed) as f32 / 100.0;
 
         let acc_windows = state.acc_windows.load(Ordering::Relaxed);
         let acc_dock = state.acc_dock.load(Ordering::Relaxed);
