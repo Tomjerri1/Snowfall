@@ -1,0 +1,7 @@
+/target
+dump.txt
+*.log
+.idea/
+.vscode/
+.gemini/
+GEMINI.md
