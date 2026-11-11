@@ -6,6 +6,7 @@ mod platform;
 mod snow;
 mod tray;
 mod settings_ui;
+mod config;
 
 use overlay::Overlay;
 use snow::{Snow, bgra};
@@ -48,6 +49,7 @@ fn main() {
     let brushlog_mode = std::env::args().any(|arg| arg == "--brushlog");
 
     let state = std::sync::Arc::new(tray::AppState::new());
+    config::load(&state);
     let tray_handle = tray::spawn_tray_thread(state.clone());
     let mut overlay = Overlay::new(state.clone());
 
@@ -162,8 +164,19 @@ fn main() {
     let mut priority_guard = ThreadPriorityGuard(false);
     let mut win_rects: Vec<(isize, tiny_skia::Rect)> = Vec::new();
 
+    let mut last_saved_snapshot = config::snapshot(&state);
+    let mut last_settings_check = Instant::now();
+
     loop {
         let frame_start = Instant::now();
+        if last_settings_check.elapsed() >= Duration::from_secs(1) {
+            last_settings_check = Instant::now();
+            let snap = config::snapshot(&state);
+            if snap != last_saved_snapshot {
+                config::save(&state);
+                last_saved_snapshot = snap;
+            }
+        }
 
         let opacity = state.opacity.load(Ordering::Relaxed);
         snow.flake_opacity = opacity as f32 / 100.0;
@@ -513,6 +526,8 @@ fn main() {
         pixmap.data_mut().fill(0);
 
         let update_timer = if perf_mode { Some(Instant::now()) } else { None };
+        snow.window_rects.clear();
+        snow.window_rects.extend_from_slice(&win_rects);
         snow.update(dt.min(0.1), &cached_segments);
         let update_duration = update_timer.map_or(0.0, |t| t.elapsed().as_secs_f32());
 
@@ -645,6 +660,7 @@ fn main() {
         }
     }
 
+    config::save(&state);
     state.quit.store(true, Ordering::Relaxed);
     let tray_hwnd = HWND(state.tray_hwnd.load(Ordering::Acquire) as *mut std::ffi::c_void);
     if !tray_hwnd.is_invalid() {

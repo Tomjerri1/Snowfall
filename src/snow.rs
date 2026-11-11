@@ -281,6 +281,7 @@ pub struct Snow {
     pub seeded: bool,
     pub height_limit: bool,
     pub brush_diag: Option<BrushDiagnostics>,
+    pub window_rects: Vec<(isize, tiny_skia::Rect)>,
 }
 
 impl Snow {
@@ -359,6 +360,7 @@ impl Snow {
             seeded: false,
             height_limit: true,
             brush_diag: None,
+            window_rects: Vec::new(),
         }
     }
 
@@ -929,7 +931,10 @@ impl Snow {
                 let len = pile.heights.len();
 
                 if is_floor_like(owner) {
-                    let mut pile_modified = false;
+                    // Gradual, circle-shaped erase: only the part of each snow column that overlaps
+                    // the brush circle is removed, and only a fraction per call.
+                    const FLOOR_ERASE_FRAC: f32 = 0.1;
+                    const FLOOR_ERASE_MAX: f32 = 1.5;
                     let mut min_c = usize::MAX;
                     let mut max_c = 0;
                     let mut floor_removed = 0.0f32;
@@ -941,30 +946,27 @@ impl Snow {
                         }
                         let col_x = pile.x_start + i as f32 * 2.0 + 1.0;
                         let dx = col_x - cx;
-                        if dx.abs() < radius {
-                            let s = (radius * radius - dx * dx).sqrt();
-                            let surface = base - h;
-                            if cy - s <= base && cy + s >= surface {
-                                let new_h = (base - (cy + s)).clamp(0.0, h);
-                                if new_h != h {
-                                    floor_removed += h - new_h;
-                                    pile.heights[i] = new_h;
-                                    pile_modified = true;
-                                    min_c = min_c.min(i);
-                                    max_c = max_c.max(i);
-                                }
-                            }
+                        if dx.abs() >= radius {
+                            continue;
                         }
+                        let s = (radius * radius - dx * dx).sqrt();
+                        // vertical overlap of the circle chord [cy-s, cy+s] with the snow column [base-h, base]
+                        let overlap = (cy + s).min(base) - (cy - s).max(base - h);
+                        if overlap <= 0.0 {
+                            continue;
+                        }
+                        let removed = (overlap * FLOOR_ERASE_FRAC).min(FLOOR_ERASE_MAX).min(h);
+                        pile.heights[i] = h - removed;
+                        floor_removed += removed;
+                        min_c = min_c.min(i);
+                        max_c = max_c.max(i);
                     }
                     if floor_removed > 0.0 {
                         if let Some(ref mut d) = self.brush_diag {
                             d.snow_removed += floor_removed;
                         }
-                    }
-                    if pile_modified {
-                        if relax_range(&mut pile.heights, min_c.saturating_sub(4), max_c + 4, MAX_SLOPE) {
-                            pile.dirty = true;
-                        }
+                        let _ = relax_range(&mut pile.heights, min_c.saturating_sub(4), max_c + 4, MAX_SLOPE);
+                        pile.dirty = true;
                     }
                 } else {
                     let mut total_removed = 0.0f32;
@@ -1292,8 +1294,22 @@ impl Snow {
                             let col_idx = ((flake.x - pile.x_start) / 2.0).floor() as i32;
                             if col_idx >= 0 && (col_idx as usize) < pile.heights.len() {
                                 let h = pile.heights[col_idx as usize];
-                                let surface_y = pile.y - h;
-                                if flake.y >= surface_y && flake.y <= seg.y + 10.0 {
+                                let mut surface_y = pile.y - h;
+                                let mut land_limit = seg.y + 10.0;
+                                if is_floor_like(seg.owner) && h > 0.0 {
+                                    // If the base of this pile is covered by a window, the pile is not visible here:
+                                    // let the flake fall down to the base line.
+                                    let probe_y = pile.y - 1.0;
+                                    let hidden = self.window_rects.iter().any(|(_, r)| {
+                                        flake.x >= r.x() && flake.x <= r.x() + r.width()
+                                            && probe_y >= r.y() && probe_y <= r.y() + r.height()
+                                    });
+                                    if hidden {
+                                        surface_y = pile.y - 1.0;
+                                        land_limit = seg.y + 24.0;
+                                    }
+                                }
+                                if flake.y >= surface_y && flake.y <= land_limit {
                                     landed = true;
                                     land_seg_owner = seg.owner;
                                     break;
