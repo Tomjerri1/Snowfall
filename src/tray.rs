@@ -3,23 +3,23 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::Foundation::{HWND, POINT, TRUE, WPARAM, LPARAM, LRESULT, HINSTANCE};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateBitmap, CreateDIBSection, DeleteObject, GetDC, ReleaseDC, HGDIOBJ,
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS
+    CreateBitmap, CreateDIBSection, DeleteObject, GetDC, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER,
+    BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
 };
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIM_ADD, NIM_DELETE, NIF_ICON, NIF_MESSAGE, NIF_TIP, NOTIFYICONDATAW
+    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CheckMenuItem, CreateIconIndirect, CreatePopupMenu, DestroyIcon, DestroyMenu, GetCursorPos,
-    LoadIconW, PostMessageW, PostQuitMessage, SetForegroundWindow, TrackPopupMenu,
-    HICON, IDI_APPLICATION, ICONINFO, WM_NULL,
-    MF_BYCOMMAND, MF_CHECKED, MF_SEPARATOR, MF_STRING, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD,
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    RegisterClassW, TranslateMessage, UnregisterClassW, WNDCLASSW, HWND_MESSAGE, MSG,
-    WM_CLOSE, WM_DESTROY, WM_RBUTTONUP, WM_LBUTTONUP, GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA
+    AppendMenuW, CheckMenuItem, CreateIconIndirect, CreatePopupMenu, CreateWindowExW,
+    DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
+    GetMessageW, GetWindowLongPtrW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW,
+    SetForegroundWindow, SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, UnregisterClassW,
+    GWLP_USERDATA, HICON, HWND_MESSAGE, ICONINFO, IDI_APPLICATION, MF_BYCOMMAND, MF_CHECKED,
+    MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD,
+    WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
 };
 
 pub const WM_TRAY_CALLBACK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
@@ -113,7 +113,12 @@ impl Drop for TrayIcon {
     }
 }
 
-unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn tray_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_TRAY_CALLBACK => {
             let l = lparam.0 as u32;
@@ -137,64 +142,66 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
 }
 
 pub fn spawn_tray_thread(state: Arc<AppState>) -> JoinHandle<()> {
-    thread::spawn(move || {
-        unsafe {
-            let hinstance = HINSTANCE(std::ptr::null_mut());
-            let class_name = windows::core::w!("SnowfallTray");
+    thread::spawn(move || unsafe {
+        let hinstance = HINSTANCE(std::ptr::null_mut());
+        let class_name = windows::core::w!("SnowfallTray");
 
-            let wnd_class = WNDCLASSW {
-                style: Default::default(),
-                lpfnWndProc: Some(tray_wnd_proc),
-                cbClsExtra: 0,
-                cbWndExtra: 0,
-                hInstance: hinstance,
-                hIcon: Default::default(),
-                hCursor: Default::default(),
-                hbrBackground: Default::default(),
-                lpszMenuName: windows::core::PCWSTR::null(),
-                lpszClassName: class_name,
-            };
+        let wnd_class = WNDCLASSW {
+            style: Default::default(),
+            lpfnWndProc: Some(tray_wnd_proc),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: hinstance,
+            hIcon: Default::default(),
+            hCursor: Default::default(),
+            hbrBackground: Default::default(),
+            lpszMenuName: windows::core::PCWSTR::null(),
+            lpszClassName: class_name,
+        };
 
-            let _ = RegisterClassW(&wnd_class);
+        let _ = RegisterClassW(&wnd_class);
 
-            let hwnd = CreateWindowExW(
-                Default::default(),
-                class_name,
-                windows::core::w!("SnowfallTrayWindow"),
-                Default::default(),
-                0, 0, 0, 0,
-                HWND_MESSAGE,
-                None,
-                hinstance,
-                None,
-            ).expect("Failed to create tray window");
+        let hwnd = CreateWindowExW(
+            Default::default(),
+            class_name,
+            windows::core::w!("SnowfallTrayWindow"),
+            Default::default(),
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            None,
+            hinstance,
+            None,
+        )
+        .expect("Failed to create tray window");
 
-            state.tray_hwnd.store(hwnd.0 as usize, Ordering::Release);
+        state.tray_hwnd.store(hwnd.0 as usize, Ordering::Release);
 
-            let state_box = Box::new(state.clone());
-            let state_ptr = Box::into_raw(state_box) as isize;
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr);
+        let state_box = Box::new(state.clone());
+        let state_ptr = Box::into_raw(state_box) as isize;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr);
 
-            let tray_icon = TrayIcon::new(hwnd);
+        let tray_icon = TrayIcon::new(hwnd);
 
-            crate::settings_ui::create_hidden(&state);
+        crate::settings_ui::create_hidden(&state);
 
-            let mut msg = MSG::default();
-            while GetMessageW(&mut msg, None, 0, 0).into() {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-
-            drop(tray_icon);
-
-            let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            if ptr != 0 {
-                let _ = Box::from_raw(ptr as *mut Arc<AppState>);
-            }
-
-            let _ = DestroyWindow(hwnd);
-            let _ = UnregisterClassW(class_name, hinstance);
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).into() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
         }
+
+        drop(tray_icon);
+
+        let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        if ptr != 0 {
+            let _ = Box::from_raw(ptr as *mut Arc<AppState>);
+        }
+
+        let _ = DestroyWindow(hwnd);
+        let _ = UnregisterClassW(class_name, hinstance);
     })
 }
 
@@ -229,25 +236,19 @@ unsafe fn create_tray_icon() -> HICON {
     };
 
     let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-    let hbmp_color = match CreateDIBSection(
-        hdc_compat,
-        &bmi,
-        DIB_RGB_COLORS,
-        &mut bits_ptr,
-        None,
-        0,
-    ) {
-        Ok(h) => h,
-        Err(_) => {
-            let _ = windows::Win32::Graphics::Gdi::DeleteDC(hdc_compat);
-            return LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
-        }
-    };
+    let hbmp_color =
+        match CreateDIBSection(hdc_compat, &bmi, DIB_RGB_COLORS, &mut bits_ptr, None, 0) {
+            Ok(h) => h,
+            Err(_) => {
+                let _ = windows::Win32::Graphics::Gdi::DeleteDC(hdc_compat);
+                return LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+            }
+        };
 
     if !bits_ptr.is_null() {
         let pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, 16 * 16 * 4);
         for i in (0..pixels.len()).step_by(4) {
-            pixels[i]     = 255;
+            pixels[i] = 255;
             pixels[i + 1] = 128;
             pixels[i + 2] = 0;
             pixels[i + 3] = 255;
@@ -256,7 +257,7 @@ unsafe fn create_tray_icon() -> HICON {
         let draw_pixel = |px: usize, py: usize, pxls: &mut [u8]| {
             if px < 16 && py < 16 {
                 let idx = (py * 16 + px) * 4;
-                pxls[idx]     = 255;
+                pxls[idx] = 255;
                 pxls[idx + 1] = 255;
                 pxls[idx + 2] = 255;
                 pxls[idx + 3] = 255;
@@ -287,7 +288,8 @@ unsafe fn create_tray_icon() -> HICON {
         hbmColor: hbmp_color,
     };
 
-    let hicon = CreateIconIndirect(&icon_info).unwrap_or_else(|_| LoadIconW(None, IDI_APPLICATION).unwrap_or_default());
+    let hicon = CreateIconIndirect(&icon_info)
+        .unwrap_or_else(|_| LoadIconW(None, IDI_APPLICATION).unwrap_or_default());
 
     let _ = DeleteObject(HGDIOBJ(hbmp_color.0));
     let _ = DeleteObject(HGDIOBJ(hbmp_mask.0));
@@ -341,7 +343,12 @@ pub unsafe fn show_context_menu(hwnd: HWND, state: &Arc<AppState>) {
             None,
         );
 
-        let _ = PostMessageW(hwnd, WM_NULL, windows::Win32::Foundation::WPARAM(0), windows::Win32::Foundation::LPARAM(0));
+        let _ = PostMessageW(
+            hwnd,
+            WM_NULL,
+            windows::Win32::Foundation::WPARAM(0),
+            windows::Win32::Foundation::LPARAM(0),
+        );
 
         let _ = DestroyMenu(hmenu);
 

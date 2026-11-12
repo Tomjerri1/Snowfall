@@ -1,29 +1,28 @@
 //! Tracker module for enumerating real application windows.
 
-use crate::platform::{WindowInfo, WinRect};
-use windows::Win32::Foundation::{HWND, LPARAM, BOOL, RECT};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
-use windows::Win32::Graphics::Gdi::{MonitorFromWindow, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, IsWindowVisible, IsIconic, GetWindowTextW, GetWindowTextLengthW,
-    GetClassNameW, GetWindowLongW, GetWindowRect, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
-    EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE,
-    EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND,
-    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND,
-    EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND,
-    GetSystemMetrics, GetForegroundWindow,
-    OBJID_WINDOW, CHILDID_SELF, IsWindow,
-    GetWindowThreadProcessId
-};
-use windows::Win32::System::Threading::GetCurrentProcessId;
-use windows::Win32::UI::Accessibility::{
-    SetWinEventHook, HWINEVENTHOOK
-};
+use crate::platform::{WinRect, WindowInfo};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::Mutex;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Dwm::{
+    DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
+};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
+use windows::Win32::System::Threading::GetCurrentProcessId;
+use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetSystemMetrics, GetWindowLongW,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+    IsWindow, IsWindowVisible, CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_HIDE,
+    EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED,
+    EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART,
+    EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, GWL_EXSTYLE, OBJID_WINDOW,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WS_EX_TOOLWINDOW,
+};
 
 struct EnumData {
     own_hwnd: HWND,
@@ -102,15 +101,7 @@ pub fn init() {
         ];
         let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
         for (i, &event) in events.iter().enumerate() {
-            let hook = SetWinEventHook(
-                event,
-                event,
-                None,
-                Some(winevent_callback),
-                0,
-                0,
-                flags,
-            );
+            let hook = SetWinEventHook(event, event, None, Some(winevent_callback), 0, 0, flags);
             if !hook.is_invalid() {
                 HOOKS[i] = hook;
             }
@@ -337,7 +328,12 @@ pub fn classify(hwnd: HWND, own: HWND) -> Result<WindowInfo, &'static str> {
 
         Ok(WindowInfo {
             hwnd: hwnd.0 as isize,
-            rect: WinRect { left, top, right, bottom },
+            rect: WinRect {
+                left,
+                top,
+                right,
+                bottom,
+            },
         })
     }
 }
@@ -356,7 +352,10 @@ pub fn snapshot(own_hwnd: HWND) -> Vec<WindowInfo> {
         windows: Vec::new(),
     };
     unsafe {
-        let _ = EnumWindows(Some(enum_window_callback), LPARAM(&mut data as *mut EnumData as isize));
+        let _ = EnumWindows(
+            Some(enum_window_callback),
+            LPARAM(&mut data as *mut EnumData as isize),
+        );
     }
     data.windows
 }
@@ -400,8 +399,11 @@ pub fn refresh_rects(windows: &mut Vec<WindowInfo>) -> bool {
                 bottom: win_rect.bottom,
             };
 
-            if new_rect.left != win.rect.left || new_rect.top != win.rect.top ||
-               new_rect.right != win.rect.right || new_rect.bottom != win.rect.bottom {
+            if new_rect.left != win.rect.left
+                || new_rect.top != win.rect.top
+                || new_rect.right != win.rect.right
+                || new_rect.bottom != win.rect.bottom
+            {
                 changed = true;
                 win.rect = new_rect;
             }
@@ -518,10 +520,14 @@ pub fn dump_all(own: HWND) -> String {
         records: Vec::new(),
     };
     unsafe {
-        let _ = EnumWindows(Some(dump_enum_window_callback), LPARAM(&mut data as *mut DumpEnumData as isize));
+        let _ = EnumWindows(
+            Some(dump_enum_window_callback),
+            LPARAM(&mut data as *mut DumpEnumData as isize),
+        );
     }
 
-    let accepted_windows: Vec<WindowInfo> = data.records
+    let accepted_windows: Vec<WindowInfo> = data
+        .records
         .iter()
         .filter_map(|r| match r.res {
             Ok(ref info) => Some(info.clone()),
@@ -529,10 +535,14 @@ pub fn dump_all(own: HWND) -> String {
         })
         .collect();
 
-    let width = unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXVIRTUALSCREEN) };
-    let height = unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CYVIRTUALSCREEN) };
-    let origin_x = unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_XVIRTUALSCREEN) };
-    let origin_y = unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_YVIRTUALSCREEN) };
+    let width =
+        unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXVIRTUALSCREEN) };
+    let height =
+        unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CYVIRTUALSCREEN) };
+    let origin_x =
+        unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_XVIRTUALSCREEN) };
+    let origin_y =
+        unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_YVIRTUALSCREEN) };
     let virt = (origin_x, origin_y, origin_x + width, origin_y + height);
     let floor = crate::platform::floor_y();
     let segments = crate::platform::build_segments(&accepted_windows, virt, floor);
@@ -569,20 +579,41 @@ pub fn dump_all(own: HWND) -> String {
 
         if rec.res.is_ok() {
             let hwnd_isize = rec.hwnd.0 as isize;
-            let win_segs: Vec<_> = segments.iter().filter(|s| s.owner == Some(hwnd_isize)).collect();
+            let win_segs: Vec<_> = segments
+                .iter()
+                .filter(|s| s.owner == Some(hwnd_isize))
+                .collect();
             if !win_segs.is_empty() {
-                let seg_strs: Vec<String> = win_segs.iter().map(|s| format!("{:.1}..{:.1} @ {:.1}", s.x1 + origin_x as f32, s.x2 + origin_x as f32, s.y + origin_y as f32)).collect();
+                let seg_strs: Vec<String> = win_segs
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{:.1}..{:.1} @ {:.1}",
+                            s.x1 + origin_x as f32,
+                            s.x2 + origin_x as f32,
+                            s.y + origin_y as f32
+                        )
+                    })
+                    .collect();
                 output.push_str(&format!("  segments: [{}]\n", seg_strs.join(", ")));
             } else {
                 let occluders = crate::platform::explain_occlusion(&accepted_windows, accepted_idx);
                 if !occluders.is_empty() {
-                    let occ_details: Vec<String> = occluders.iter().map(|&occ_hwnd| {
-                        if let Some(occ_rec) = data.records.iter().find(|r| r.hwnd.0 as isize == occ_hwnd) {
-                            format!("0x{:X} ({}) \"{}\"", occ_hwnd, occ_rec.class_name, occ_rec.title)
-                        } else {
-                            format!("0x{:X}", occ_hwnd)
-                        }
-                    }).collect();
+                    let occ_details: Vec<String> = occluders
+                        .iter()
+                        .map(|&occ_hwnd| {
+                            if let Some(occ_rec) =
+                                data.records.iter().find(|r| r.hwnd.0 as isize == occ_hwnd)
+                            {
+                                format!(
+                                    "0x{:X} ({}) \"{}\"",
+                                    occ_hwnd, occ_rec.class_name, occ_rec.title
+                                )
+                            } else {
+                                format!("0x{:X}", occ_hwnd)
+                            }
+                        })
+                        .collect();
                     output.push_str(&format!("  occluded by: [{}]\n", occ_details.join(", ")));
                 } else {
                     output.push_str("  segments: [] (no occlusion found)\n");

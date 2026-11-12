@@ -1,27 +1,29 @@
 //! Main entry point for snowfall application.
 
-mod overlay;
-mod tracker;
-mod platform;
-mod snow;
-mod tray;
-mod settings_ui;
 mod config;
+mod overlay;
+mod platform;
+mod settings_ui;
+mod snow;
+mod tracker;
+mod tray;
 
 use overlay::Overlay;
-use snow::{Snow, bgra};
+use snow::{bgra, Snow};
+use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use std::collections::VecDeque;
-use windows::Win32::Foundation::{HWND, WPARAM, LPARAM, POINT};
-use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    ShowWindow, SW_HIDE, SW_SHOWNOACTIVATE, GetCursorPos
-};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
 use windows::Win32::System::Threading::{
-    GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_NORMAL
+    GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_NORMAL,
+};
+use windows::Win32::UI::HiDpi::{
+    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetSystemMetrics, ShowWindow, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_HIDE, SW_SHOWNOACTIVATE,
 };
 
 const LATENCY_COMP: f32 = 0.025;
@@ -64,7 +66,14 @@ fn main() {
         state.quit.store(true, Ordering::Relaxed);
         let tray_hwnd = HWND(state.tray_hwnd.load(Ordering::Acquire) as *mut std::ffi::c_void);
         if !tray_hwnd.is_invalid() {
-            let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::PostMessageW(tray_hwnd, windows::Win32::UI::WindowsAndMessaging::WM_CLOSE, WPARAM(0), LPARAM(0)) };
+            let _ = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    tray_hwnd,
+                    windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            };
         }
         let _ = tray_handle.join();
         return;
@@ -100,7 +109,11 @@ fn main() {
     let mut prev_acc_windows = acc_windows;
     let mut prev_acc_dock = acc_dock;
     let mut prev_acc_ground = acc_ground;
-    let raw_segments = platform::build_segments(&cached_windows, virt, (floor, acc_windows, acc_dock, acc_ground));
+    let raw_segments = platform::build_segments(
+        &cached_windows,
+        virt,
+        (floor, acc_windows, acc_dock, acc_ground),
+    );
     let mut cached_segments: Vec<platform::Segment> = raw_segments
         .into_iter()
         .map(|seg| platform::Segment {
@@ -284,7 +297,9 @@ fn main() {
         let acc_dock = state.acc_dock.load(Ordering::Relaxed);
         let acc_ground = state.acc_ground.load(Ordering::Relaxed);
 
-        let flags_changed = acc_windows != prev_acc_windows || acc_dock != prev_acc_dock || acc_ground != prev_acc_ground;
+        let flags_changed = acc_windows != prev_acc_windows
+            || acc_dock != prev_acc_dock
+            || acc_ground != prev_acc_ground;
         if flags_changed {
             prev_acc_windows = acc_windows;
             prev_acc_dock = acc_dock;
@@ -292,7 +307,11 @@ fn main() {
         }
 
         let mut segments_rebuilt = false;
-        let tracker_timer = if perf_mode { Some(Instant::now()) } else { None };
+        let tracker_timer = if perf_mode {
+            Some(Instant::now())
+        } else {
+            None
+        };
 
         if is_dragging {
             if let Some(new_rect) = tracker::read_rect(moving_hwnd) {
@@ -318,7 +337,11 @@ fn main() {
                     if drag_samples.len() >= 8 {
                         drag_samples.pop_front();
                     }
-                    drag_samples.push_back(DragSample { time: sample_now, x: cur_x, y: cur_y });
+                    drag_samples.push_back(DragSample {
+                        time: sample_now,
+                        x: cur_x,
+                        y: cur_y,
+                    });
 
                     if drag_samples.len() >= 2 {
                         let newest = drag_samples.back().unwrap();
@@ -431,7 +454,11 @@ fn main() {
             let virt = (origin_x, origin_y, origin_x + width, origin_y + height);
             let segments_windows = if is_dragging || ease_start_time.is_some() {
                 let mut temp_wins = cached_windows.clone();
-                let target_hwnd = if is_dragging { moving_hwnd } else { last_moving_hwnd };
+                let target_hwnd = if is_dragging {
+                    moving_hwnd
+                } else {
+                    last_moving_hwnd
+                };
                 if target_hwnd != 0 {
                     if let Some(win) = temp_wins.iter_mut().find(|w| w.hwnd == target_hwnd) {
                         win.rect.left = (win.rect.left as f32 + comp_offset.0).round() as i32;
@@ -445,7 +472,11 @@ fn main() {
                 cached_windows.clone()
             };
 
-            let raw_segments = platform::build_segments(&segments_windows, virt, (floor, acc_windows, acc_dock, acc_ground));
+            let raw_segments = platform::build_segments(
+                &segments_windows,
+                virt,
+                (floor, acc_windows, acc_dock, acc_ground),
+            );
             cached_segments = raw_segments
                 .into_iter()
                 .map(|seg| platform::Segment {
@@ -460,16 +491,14 @@ fn main() {
         }
 
         win_rects.clear();
-        win_rects.extend(cached_windows
-            .iter()
-            .filter_map(|win| {
-                let rx = win.rect.left - origin_x;
-                let ry = win.rect.top - origin_y;
-                let rw = win.rect.right - win.rect.left;
-                let rh = win.rect.bottom - win.rect.top;
-                tiny_skia::Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32)
-                    .map(|rect| (win.hwnd, rect))
-            }));
+        win_rects.extend(cached_windows.iter().filter_map(|win| {
+            let rx = win.rect.left - origin_x;
+            let ry = win.rect.top - origin_y;
+            let rw = win.rect.right - win.rect.left;
+            let rh = win.rect.bottom - win.rect.top;
+            tiny_skia::Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32)
+                .map(|rect| (win.hwnd, rect))
+        }));
 
         let (steps, start_x, start_y) = if let Some(prev_pos) = prev_cursor_pos {
             let dx = cx - prev_pos.0;
@@ -510,7 +539,11 @@ fn main() {
         if brushlog_mode && brushlog_last_print.elapsed() >= Duration::from_millis(500) {
             if let Some(ref d) = snow.brush_diag {
                 if d.cursor_moved {
-                    let avg_speed = if d.speed_count > 0 { d.speed_sum / d.speed_count as f32 } else { 0.0 };
+                    let avg_speed = if d.speed_count > 0 {
+                        d.speed_sum / d.speed_count as f32
+                    } else {
+                        0.0
+                    };
                     let extra_count = snow.flakes.iter().filter(|f| f.extra).count();
                     let pile_h = snow.max_pile_height_under_cursor(cx, cy, &win_rects);
                     println!(
@@ -526,13 +559,21 @@ fn main() {
         let mut pixmap = overlay.pixmap_mut();
         pixmap.data_mut().fill(0);
 
-        let update_timer = if perf_mode { Some(Instant::now()) } else { None };
+        let update_timer = if perf_mode {
+            Some(Instant::now())
+        } else {
+            None
+        };
         snow.window_rects.clear();
         snow.window_rects.extend_from_slice(&win_rects);
         snow.update(dt.min(0.1), &cached_segments);
         let update_duration = update_timer.map_or(0.0, |t| t.elapsed().as_secs_f32());
 
-        let draw_timer = if perf_mode { Some(Instant::now()) } else { None };
+        let draw_timer = if perf_mode {
+            Some(Instant::now())
+        } else {
+            None
+        };
         snow.draw(&mut pixmap, &win_rects);
         let draw_duration = draw_timer.map_or(0.0, |t| t.elapsed().as_secs_f32());
 
@@ -543,7 +584,9 @@ fn main() {
                 let rw = win.rect.right - win.rect.left;
                 let rh = win.rect.bottom - win.rect.top;
 
-                if let Some(rect) = tiny_skia::Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32) {
+                if let Some(rect) =
+                    tiny_skia::Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32)
+                {
                     let mut pb = tiny_skia::PathBuilder::new();
                     pb.push_rect(rect);
                     if let Some(path) = pb.finish() {
@@ -583,7 +626,11 @@ fn main() {
             }
         }
 
-        let present_timer = if perf_mode { Some(Instant::now()) } else { None };
+        let present_timer = if perf_mode {
+            Some(Instant::now())
+        } else {
+            None
+        };
         overlay.present();
         let present_duration = present_timer.map_or(0.0, |t| t.elapsed().as_secs_f32());
 
@@ -665,11 +712,31 @@ fn main() {
     state.quit.store(true, Ordering::Relaxed);
     let tray_hwnd = HWND(state.tray_hwnd.load(Ordering::Acquire) as *mut std::ffi::c_void);
     if !tray_hwnd.is_invalid() {
-        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::PostMessageW(tray_hwnd, windows::Win32::UI::WindowsAndMessaging::WM_CLOSE, WPARAM(0), LPARAM(0)) };
+        let _ = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                tray_hwnd,
+                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                WPARAM(0),
+                LPARAM(0),
+            )
+        };
     } else {
-        let hwnd = unsafe { windows::Win32::UI::WindowsAndMessaging::FindWindowW(windows::core::w!("SnowfallTray"), None).unwrap_or_default() };
+        let hwnd = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::FindWindowW(
+                windows::core::w!("SnowfallTray"),
+                None,
+            )
+            .unwrap_or_default()
+        };
         if !hwnd.is_invalid() {
-            let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::PostMessageW(hwnd, windows::Win32::UI::WindowsAndMessaging::WM_CLOSE, WPARAM(0), LPARAM(0)) };
+            let _ = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    hwnd,
+                    windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            };
         }
     }
     let _ = tray_handle.join();

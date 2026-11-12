@@ -159,7 +159,11 @@ fn build_segments_inner(
 
             // Skip a window only if its top <= virtual top + 2, or it is truly docked/maximized:
             // left <= virt left + 2 && right >= virt right - 2 && top <= work-area top + 2.
-            if top <= virt_top + 2.0 || (left <= virt_left + 2.0 && right >= virt_right - 2.0 && top <= work_area_top + 2.0) {
+            if top <= virt_top + 2.0
+                || (left <= virt_left + 2.0
+                    && right >= virt_right - 2.0
+                    && top <= work_area_top + 2.0)
+            {
                 continue;
             }
 
