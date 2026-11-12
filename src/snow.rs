@@ -2085,4 +2085,84 @@ mod tests {
         let val = smoothstep(0.0, 1.0, 0.5);
         assert!((val - 0.5).abs() <= 0.001);
     }
+
+    fn seg(owner: Option<isize>, x1: f32, x2: f32, y: f32) -> Segment {
+        Segment {
+            x1,
+            x2,
+            y,
+            owner,
+            full_left: x1,
+            full_right: x2,
+        }
+    }
+
+    #[test]
+    fn pile_created() {
+        let mut s = Snow::new(800.0, 600.0, 50);
+        s.update(0.0, &[seg(Some(1), 0.0, 400.0, 300.0)]);
+        assert!(s.piles.contains_key(&Some(1)));
+        assert_eq!(s.piles[&Some(1)].heights.len(), 200);
+    }
+
+    #[test]
+    fn pile_removed() {
+        let mut s = Snow::new(800.0, 600.0, 50);
+        s.update(0.0, &[seg(Some(1), 0.0, 400.0, 300.0)]);
+        assert!(s.piles.contains_key(&Some(1)));
+        s.update(0.0, &[]);
+        assert!(!s.piles.contains_key(&Some(1)));
+    }
+
+    #[test]
+    fn no_nan() {
+        let mut s = Snow::new(800.0, 600.0, 100);
+        let segs = [seg(Some(1), 0.0, 400.0, 300.0)];
+        for _ in 0..600 {
+            s.update(0.05, &segs);
+        }
+        for f in &s.flakes {
+            assert!(f.x.is_finite());
+            assert!(f.y.is_finite());
+            assert!(f.vx.is_finite());
+            assert!(f.vy.is_finite());
+        }
+        for pile in s.piles.values() {
+            for &h in &pile.heights {
+                assert!(h.is_finite());
+                assert!(h >= 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn accumulation() {
+        let mut s = Snow::new(800.0, 600.0, 400);
+        let segs = [seg(Some(1), 0.0, 800.0, 300.0)];
+        for _ in 0..1200 {
+            s.update(0.05, &segs);
+        }
+        let max_h = s.piles[&Some(1)]
+            .heights
+            .iter()
+            .cloned()
+            .fold(0.0f32, f32::max);
+        assert!(max_h > 0.0);
+    }
+
+    #[test]
+    fn clear() {
+        let mut s = Snow::new(800.0, 600.0, 100);
+        s.start_clear();
+        assert!(s.clearing);
+        assert!(s.clear_dir == 1.0 || s.clear_dir == -1.0);
+
+        for _ in 0..600 {
+            if !s.clearing {
+                break;
+            }
+            s.update(0.05, &[]);
+        }
+        assert!(!s.clearing);
+    }
 }
