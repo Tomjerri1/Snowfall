@@ -504,13 +504,13 @@ impl Snow {
                 controls.push(rng.gen_range(min_h..max_h));
             }
 
-            for i in 0..len {
+            for (i, h) in pile.heights.iter_mut().enumerate().take(len) {
                 let seg_idx = i / spacing;
                 let t = (i % spacing) as f32 / spacing as f32;
                 let st = t * t * (3.0 - 2.0 * t);
                 let h1 = controls[seg_idx];
                 let h2 = controls[(seg_idx + 1).min(num_controls - 1)];
-                pile.heights[i] = h1 * (1.0 - st) + h2 * st;
+                *h = h1 * (1.0 - st) + h2 * st;
             }
 
             relax_range(&mut pile.heights, 0, len, MAX_SLOPE);
@@ -1069,9 +1069,9 @@ impl Snow {
                     let end_search = (cx_col + 20).min(pile.heights.len() as isize - 1) as usize;
                     let mut local_max = 0.0f32;
                     if start_search <= end_search && end_search < pile.heights.len() {
-                        for c in start_search..=end_search {
-                            if pile.heights[c] > local_max {
-                                local_max = pile.heights[c];
+                        for &h in pile.heights.iter().take(end_search + 1).skip(start_search) {
+                            if h > local_max {
+                                local_max = h;
                             }
                         }
                     }
