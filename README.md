@@ -8,7 +8,8 @@ A lightweight **Windows desktop overlay** that makes snow fall over your screen.
 - **Snow piles** on top of windows, on the taskbar ("Dock") and on the bottom edge of the screen ("Ground"). Piles are drawn *behind* windows that cover them.
 - Piles follow their window when you drag it. Drag a window fast and the snow flies off it.
 - Minimize or close a window and its pile crumbles and falls down.
-- **Mouse interaction:** move the cursor over a pile to plow the snow into a mound (it spills off the window edges), or over falling flakes to push them around. On the taskbar pile the snow simply disappears under the cursor.
+- **Clear snow** blows everything away with a swirling wind gust: a wave front sweeps across the screen, lifting the piles and the falling flakes with it. The wind direction (left or right) is chosen randomly each time, and snowfall resumes from the top once the screen is clear.
+- **Mouse interaction:** move the cursor over a pile to plow the snow into a mound (it spills off the window edges), or over falling flakes to push them around. On the taskbar pile the cursor gradually erases snow in a circular area.
 - Tray icon with a small settings window, global hotkey to quit, low CPU.
 
 ## Usage
@@ -23,15 +24,16 @@ A lightweight **Windows desktop overlay** that makes snow fall over your screen.
 
 | Setting | What it does |
 |---|---|
-| Intensity | Number of falling flakes (50-3000) |
+| Intensity | Amount of falling snow, shown in % |
 | Opacity | Opacity of the falling flakes (10-100%). Piles are not affected |
+| Strength | How strong the snowfall is (25-200%): scales the fall speed and the wind |
 | Frame rate | 20 / 30 / 60 FPS (the overlay boosts to 60 FPS while a window is being moved) |
 | Accumulate | Where snow collects: **Windows**, **Dock** (top of the taskbar), **Ground** (bottom of the screen) |
 | Height limit | On: piles stop at a fixed height. Off: piles keep growing until they fill the screen |
 | Mouse pushes snow | Cursor pushes falling flakes |
-| Pause / Clear snow | Freeze the simulation / remove all snow |
+| Pause / Clear snow | Freeze the simulation / blow all snow away with a wind gust |
 
-*Note: Settings are not saved between runs yet.*
+Settings are saved automatically to `%APPDATA%\Snowfall\settings.txt` and restored on the next start (Pause is not saved).
 
 ## Known limitations
 

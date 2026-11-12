@@ -18,16 +18,22 @@ Compiled binary output: `target\release\snowfall.exe`.
 ## Architecture & How It Works
 
 1. Rendering & Compositing:
-    - A single topmost, transparent window spanning the entire virtual desktop (`WS_EX_LAYERED | WS_EX_TRANSPARENT`).
-    - Frame rendering is handled purely on the CPU via [`tiny-skia`](https://crates.io/crates/tiny-skia), painted directly into a DIB section, and presented via `UpdateLayeredWindow`.
+   - A single topmost, transparent window spanning the entire virtual desktop (`WS_EX_LAYERED | WS_EX_TRANSPARENT`).
+   - Frame rendering is handled purely on the CPU via [`tiny-skia`](https://crates.io/crates/tiny-skia), painted directly into a DIB section, and presented via `UpdateLayeredWindow`.
 
 2. Window Tracking & Hitboxes:
-    - Application bounds are sampled using `EnumWindows`, `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`, and hooked dynamically via `SetWinEventHook`.
-    - The visible top edge of each window (clipped against overlapping windows above it in the Z-order) is resolved into one or more 1D landing line segments.
+   - Application bounds are sampled using `EnumWindows`, `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`, and hooked dynamically via `SetWinEventHook`.
+   - The visible top edge of each window (clipped against overlapping windows above it in the Z-order) is resolved into one or more 1D landing line segments.
 
 3. Physics & Accumulation:
-    - Settled flakes increment column height values in discrete segment arrays.
-    - A local slope-relaxation pass simulates angle-of-repose physics, allowing drifts to slide naturally off edges.
+   - Settled flakes increment column height values in discrete segment arrays.
+   - A local slope-relaxation pass simulates angle-of-repose physics, allowing drifts to slide naturally off edges.
+   - Piles hidden behind a window (for example the dock pile under a maximized window) do not stop flakes: they keep falling down to the pile's base line.
+   - Clear snow starts a directional wave front (random left or right) that turns pile columns into flying flakes. Falling flakes are swept by the same front, with a swirling motion on top of the wind. New snowfall resumes from the top once the screen is clear.
+
+4. Settings Persistence:
+   - `src/config.rs` stores the settings as simple `key=value` lines in `%APPDATA%\Snowfall\settings.txt`.
+   - The file is loaded at startup, written about once per second after a change and once more on exit. Invalid values are ignored or clamped; Pause is intentionally not saved.
 
 ## CLI Debugging Flags
 
