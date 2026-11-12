@@ -27,12 +27,8 @@ pub fn snapshot(state: &AppState) -> [usize; 9] {
     ]
 }
 
-/// Loads saved settings into `state`. Missing file or bad values are ignored.
-pub fn load(state: &AppState) {
-    let Some(path) = config_path() else { return };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return;
-    };
+/// Parses and applies settings from text to `state`.
+pub fn apply_settings(state: &AppState, text: &str) {
     for line in text.lines() {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -61,17 +57,31 @@ pub fn load(state: &AppState) {
     }
 }
 
+/// Loads saved settings into `state`. Missing file or bad values are ignored.
+pub fn load(state: &AppState) {
+    let Some(path) = config_path() else { return };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    apply_settings(state, &text);
+}
+
+/// Formats current settings into string representation.
+pub fn format_settings(state: &AppState) -> String {
+    let s = snapshot(state);
+    format!(
+        "flakes={}\nfps={}\nopacity={}\nheight_limit={}\nacc_windows={}\nacc_dock={}\nacc_ground={}\nmouse_flakes={}\nstrength={}\n",
+        s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]
+    )
+}
+
 /// Saves current settings. Errors are ignored (settings are best-effort).
 pub fn save(state: &AppState) {
     let Some(path) = config_path() else { return };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let s = snapshot(state);
-    let text = format!(
-        "flakes={}\nfps={}\nopacity={}\nheight_limit={}\nacc_windows={}\nacc_dock={}\nacc_ground={}\nmouse_flakes={}\nstrength={}\n",
-        s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]
-    );
+    let text = format_settings(state);
     let tmp = path.with_extension("tmp");
     if std::fs::write(&tmp, text).is_ok() {
         let _ = std::fs::rename(&tmp, &path);
