@@ -593,8 +593,10 @@ fn main() {
                         let mut paint = tiny_skia::Paint::default();
                         let color = bgra(1.0, 0.0, 0.0, 1.0);
                         paint.set_color(color);
-                        let mut stroke = tiny_skia::Stroke::default();
-                        stroke.width = 2.0;
+                        let stroke = tiny_skia::Stroke {
+                            width: 2.0,
+                            ..Default::default()
+                        };
                         pixmap.stroke_path(
                             &path,
                             &paint,
@@ -613,8 +615,10 @@ fn main() {
                 if let Some(path) = pb.finish() {
                     let mut paint = tiny_skia::Paint::default();
                     paint.set_color(bgra(0.0, 1.0, 0.0, 1.0));
-                    let mut stroke = tiny_skia::Stroke::default();
-                    stroke.width = 3.0;
+                    let stroke = tiny_skia::Stroke {
+                        width: 3.0,
+                        ..Default::default()
+                    };
                     pixmap.stroke_path(
                         &path,
                         &paint,

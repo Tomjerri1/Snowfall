@@ -241,7 +241,7 @@ impl Pile {
                 tiny_skia::SpreadMode::Pad,
                 Transform::identity(),
             ) {
-                self.cached_shader = Some(shader.into());
+                self.cached_shader = Some(shader);
             }
         } else {
             self.cached_shader = None;
@@ -498,7 +498,7 @@ impl Snow {
             };
 
             let spacing = 12;
-            let num_controls = (len + spacing - 1) / spacing + 1;
+            let num_controls = len.div_ceil(spacing) + 1;
             let mut controls = Vec::with_capacity(num_controls);
             for _ in 0..num_controls {
                 controls.push(rng.gen_range(min_h..max_h));
@@ -518,6 +518,7 @@ impl Snow {
         }
     }
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     fn create_sprites() -> Vec<Sprite> {
         let mut sprites = Vec::with_capacity(128);
         for i in 0..8 {
@@ -736,11 +737,12 @@ impl Snow {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn distribute_berm(
         berm_amt: f32,
         start_c: isize,
         step: isize,
-        pile_heights: &mut Vec<f32>,
+        pile_heights: &mut [f32],
         min_c_ref: &mut usize,
         max_c_ref: &mut usize,
         full_l: f32,
@@ -761,9 +763,9 @@ impl Snow {
         let mut rng = rand::thread_rng();
         let mut sum_weights = 0.0f32;
         let mut weights = vec![0.0f32; w_cols];
-        for k in 0..w_cols {
+        for (k, weight) in weights.iter_mut().enumerate().take(w_cols) {
             let w = 0.5 * (1.0 + (std::f32::consts::PI * k as f32 / w_cols as f32).cos());
-            weights[k] = w;
+            *weight = w;
             sum_weights += w;
         }
         if sum_weights > 0.0 {
@@ -773,8 +775,8 @@ impl Snow {
         }
 
         let len = pile_heights.len() as isize;
-        for k in 0..w_cols {
-            let amt = berm_amt * weights[k];
+        for (k, &w) in weights.iter().enumerate().take(w_cols) {
+            let amt = berm_amt * w;
             let target_col = start_c + (k as isize) * step;
             if target_col >= 0 && target_col < len {
                 let idx = target_col as usize;
@@ -907,15 +909,15 @@ impl Snow {
                 }
             }
 
-            if min_c <= max_c {
-                if relax_range(
+            if min_c <= max_c
+                && relax_range(
                     &mut pile.heights,
                     min_c.saturating_sub(4),
                     max_c + 4,
                     MAX_SLOPE,
-                ) {
-                    pile.dirty = true;
-                }
+                )
+            {
+                pile.dirty = true;
             }
         }
 
@@ -988,8 +990,7 @@ impl Snow {
             } else {
                 if let Some(hwnd) = owner {
                     if let Some(pos) = win_rects.iter().position(|(h, _)| *h == hwnd) {
-                        for i in 0..pos {
-                            let rect = win_rects[i].1;
+                        for (_, rect) in win_rects.iter().take(pos) {
                             if cx >= rect.x()
                                 && cx <= rect.x() + rect.width()
                                 && cy >= rect.y()
@@ -1240,15 +1241,15 @@ impl Snow {
                         }
                         self.brush_diag = diag_ref;
 
-                        if min_c <= max_c {
-                            if relax_range(
+                        if min_c <= max_c
+                            && relax_range(
                                 &mut pile.heights,
                                 min_c.saturating_sub(4),
                                 max_c + 4,
                                 2.6,
-                            ) {
-                                pile.dirty = true;
-                            }
+                            )
+                        {
+                            pile.dirty = true;
                         }
                     }
                 }
@@ -1280,7 +1281,7 @@ impl Snow {
             self.clear_gust = (self.clear_gust - dt / 0.8).max(0.0);
         }
 
-        for (_, data) in self.owner_data.iter_mut() {
+        for data in self.owner_data.values_mut() {
             data.visible_intervals.clear();
         }
 
@@ -1306,7 +1307,7 @@ impl Snow {
 
         // 1. Remove piles whose owner is no longer present
         let mut owners_to_remove = Vec::new();
-        for (owner, _) in &self.piles {
+        for owner in self.piles.keys() {
             if !self.scratch_current_owners.contains(owner) {
                 owners_to_remove.push(*owner);
             }
@@ -1441,7 +1442,7 @@ impl Snow {
             let front = self.clear_front;
             let extra_count = self.flakes.iter().filter(|f| f.extra).count();
             let mut new_flakes = Vec::new();
-            for (_, pile) in self.piles.iter_mut() {
+            for pile in self.piles.values_mut() {
                 let mut changed = false;
                 for i in 0..pile.heights.len() {
                     let h = pile.heights[i];
@@ -1562,7 +1563,7 @@ impl Snow {
 
             if flake.extra && flake.ballistic > 0.0 {
                 flake.bvy += 520.0 * dt;
-                flake.bvx *= (-1.0 * dt).exp();
+                flake.bvx *= (-dt).exp();
                 flake.bvy *= (-0.8 * dt).exp();
                 flake.ballistic -= dt;
                 if flake.ballistic <= 0.0 {
@@ -1847,15 +1848,15 @@ impl Snow {
                 }
             }
 
-            if pile_modified {
-                if relax_range(
+            if pile_modified
+                && relax_range(
                     &mut pile.heights,
                     min_c.saturating_sub(4),
                     max_c + 4,
                     MAX_SLOPE,
-                ) {
-                    pile.dirty = true;
-                }
+                )
+            {
+                pile.dirty = true;
             }
         }
 
@@ -1899,8 +1900,10 @@ impl Snow {
         if let Some(ref top_path) = pile.cached_top_path {
             let mut paint = Paint::default();
             paint.set_color(bgra(1.0, 1.0, 1.0, 0.85));
-            let mut stroke = Stroke::default();
-            stroke.width = 1.5;
+            let stroke = Stroke {
+                width: 1.5,
+                ..Default::default()
+            };
             pixmap.stroke_path(top_path, &paint, &stroke, Transform::identity(), None);
         }
     }
@@ -1914,9 +1917,11 @@ impl Snow {
         }
 
         for &(hwnd, ref rect) in win_rects.iter().rev() {
-            let mut clear_paint = Paint::default();
-            clear_paint.blend_mode = tiny_skia::BlendMode::Clear;
-            clear_paint.anti_alias = false;
+            let clear_paint = Paint {
+                blend_mode: tiny_skia::BlendMode::Clear,
+                anti_alias: false,
+                ..Default::default()
+            };
             let mut pb = PathBuilder::new();
             pb.push_rect(*rect);
             if let Some(path) = pb.finish() {

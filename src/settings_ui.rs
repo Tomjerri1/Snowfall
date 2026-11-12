@@ -104,6 +104,7 @@ pub fn toggle(state: &Arc<AppState>) {
     }
 }
 
+#[allow(clippy::manual_dangling_ptr)]
 pub fn create_hidden(state: &Arc<AppState>) {
     let hwnd_val = state.settings_hwnd.load(Ordering::Acquire);
     if hwnd_val != 0 {
@@ -114,6 +115,7 @@ pub fn create_hidden(state: &Arc<AppState>) {
         let class_name = windows::core::w!("SnowfallSettings");
 
         let hcursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
+        // 1 is a MAKEINTRESOURCE icon id, not a dangling pointer
         let hicon = GetModuleHandleW(None)
             .and_then(|h| LoadIconW(h, windows::core::PCWSTR(1 as *const u16)))
             .unwrap_or_default();
@@ -337,14 +339,14 @@ fn clear_btn_rect() -> RECT {
 }
 
 fn hit_test_slider(x: i32, y: i32) -> Option<SliderKind> {
-    if x >= MARGIN_X && x <= MARGIN_X + TRACK_WIDTH {
-        if y >= SLIDER1_TOP && y < SLIDER1_TOP + ROW_HEIGHT {
+    if (MARGIN_X..=MARGIN_X + TRACK_WIDTH).contains(&x) {
+        if (SLIDER1_TOP..SLIDER1_TOP + ROW_HEIGHT).contains(&y) {
             return Some(SliderKind::Intensity);
         }
-        if y >= SLIDER2_TOP && y < SLIDER2_TOP + ROW_HEIGHT {
+        if (SLIDER2_TOP..SLIDER2_TOP + ROW_HEIGHT).contains(&y) {
             return Some(SliderKind::Opacity);
         }
-        if y >= SLIDER3_TOP && y < SLIDER3_TOP + ROW_HEIGHT {
+        if (SLIDER3_TOP..SLIDER3_TOP + ROW_HEIGHT).contains(&y) {
             return Some(SliderKind::Strength);
         }
     }
@@ -896,7 +898,7 @@ fn handle_click(state: &AppState, x: i32, y: i32) -> bool {
     let t2_l = t1_r + TILE_GAP;
     let t2_r = t2_l + TILE_WIDTH;
 
-    if y >= TILES_TOP && y <= TILES_TOP + TILE_HEIGHT {
+    if (TILES_TOP..=TILES_TOP + TILE_HEIGHT).contains(&y) {
         if x >= t0_l && x <= t0_r {
             let cur = state.acc_windows.load(Ordering::Relaxed);
             state.acc_windows.store(!cur, Ordering::Relaxed);
@@ -915,13 +917,13 @@ fn handle_click(state: &AppState, x: i32, y: i32) -> bool {
     }
 
     // Check switches
-    if x >= MARGIN_X && x <= MARGIN_X + TRACK_WIDTH {
-        if y >= SWITCH1_TOP && y <= SWITCH1_TOP + SWITCH_ROW_HEIGHT {
+    if (MARGIN_X..=MARGIN_X + TRACK_WIDTH).contains(&x) {
+        if (SWITCH1_TOP..=SWITCH1_TOP + SWITCH_ROW_HEIGHT).contains(&y) {
             let cur = state.height_limit.load(Ordering::Relaxed);
             state.height_limit.store(!cur, Ordering::Relaxed);
             return true;
         }
-        if y >= SWITCH2_TOP && y <= SWITCH2_TOP + SWITCH_ROW_HEIGHT {
+        if (SWITCH2_TOP..=SWITCH2_TOP + SWITCH_ROW_HEIGHT).contains(&y) {
             let cur = state.mouse_flakes.load(Ordering::Relaxed);
             state.mouse_flakes.store(!cur, Ordering::Relaxed);
             return true;

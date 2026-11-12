@@ -187,8 +187,10 @@ unsafe fn fullscreen_active_inner() -> bool {
     if hmonitor.is_invalid() {
         return false;
     }
-    let mut mi = MONITORINFO::default();
-    mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    let mut mi = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
     if !GetMonitorInfoW(hmonitor, &mut mi).as_bool() {
         return false;
     }

@@ -72,13 +72,15 @@ impl TrayIcon {
     pub fn new(hwnd: HWND) -> Self {
         let hicon = unsafe { create_tray_icon() };
         unsafe {
-            let mut nid = NOTIFYICONDATAW::default();
-            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-            nid.hWnd = hwnd;
-            nid.uID = TRAY_ID;
-            nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-            nid.uCallbackMessage = WM_TRAY_CALLBACK;
-            nid.hIcon = hicon;
+            let mut nid = NOTIFYICONDATAW {
+                cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+                hWnd: hwnd,
+                uID: TRAY_ID,
+                uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
+                uCallbackMessage: WM_TRAY_CALLBACK,
+                hIcon: hicon,
+                ..Default::default()
+            };
 
             let tip = windows::core::w!("Snowfall");
             let dest = &mut nid.szTip;
@@ -100,10 +102,12 @@ impl TrayIcon {
 impl Drop for TrayIcon {
     fn drop(&mut self) {
         unsafe {
-            let mut nid = NOTIFYICONDATAW::default();
-            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-            nid.hWnd = self.hwnd;
-            nid.uID = TRAY_ID;
+            let nid = NOTIFYICONDATAW {
+                cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+                hWnd: self.hwnd,
+                uID: TRAY_ID,
+                ..Default::default()
+            };
             let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
 
             if !self.hicon.is_invalid() {
@@ -205,6 +209,7 @@ pub fn spawn_tray_thread(state: Arc<AppState>) -> JoinHandle<()> {
     })
 }
 
+#[allow(clippy::manual_dangling_ptr)] // 1 is a MAKEINTRESOURCE icon id, not a dangling pointer
 unsafe fn create_tray_icon() -> HICON {
     if let Ok(hinst) = GetModuleHandleW(None) {
         if let Ok(hicon) = LoadIconW(hinst, windows::core::PCWSTR(1 as *const u16)) {

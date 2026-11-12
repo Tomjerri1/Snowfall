@@ -170,8 +170,7 @@ fn build_segments_inner(
             // Occlusion: subtract from the top edge every x-interval of any window j with a smaller index (higher in z-order)
             // whose vertical range [top_j, bottom_j) contains the edge's y.
             let mut blockers = Vec::new();
-            for j in 0..i {
-                let blocker_win = &windows_list[j];
+            for blocker_win in windows_list.iter().take(i) {
                 let top_j = blocker_win.rect.top as f32;
                 let bottom_j = blocker_win.rect.bottom as f32;
                 if top_j <= top && bottom_j > top {
@@ -215,17 +214,19 @@ pub fn explain_occlusion(windows: &[WindowInfo], idx: usize) -> Vec<isize> {
     let top = win.rect.top as f32;
 
     let mut occluding = Vec::new();
-    for j in 0..idx {
-        let blocker = &windows[j];
+    for blocker in windows.iter().take(idx) {
         let top_j = blocker.rect.top as f32;
         let bottom_j = blocker.rect.bottom as f32;
         let bx1 = blocker.rect.left as f32;
         let bx2 = blocker.rect.right as f32;
 
-        if top_j <= top && bottom_j > top && bx1 < right && bx2 > left {
-            if !occluding.contains(&blocker.hwnd) {
-                occluding.push(blocker.hwnd);
-            }
+        if top_j <= top
+            && bottom_j > top
+            && bx1 < right
+            && bx2 > left
+            && !occluding.contains(&blocker.hwnd)
+        {
+            occluding.push(blocker.hwnd);
         }
     }
     occluding
