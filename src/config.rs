@@ -87,3 +87,80 @@ pub fn save(state: &AppState) {
         let _ = std::fs::rename(&tmp, &path);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults() {
+        let state = AppState::new();
+        let s = format_settings(&state);
+        assert!(s.contains("flakes=400"));
+        assert!(s.contains("fps=30"));
+        assert!(s.contains("opacity=100"));
+        assert!(s.contains("strength=100"));
+    }
+
+    #[test]
+    fn clamps() {
+        let state = AppState::new();
+        apply_settings(&state, "flakes=1\nopacity=0\nstrength=999\n");
+        assert_eq!(state.target_flakes.load(Ordering::Relaxed), 50);
+        assert_eq!(state.opacity.load(Ordering::Relaxed), 10);
+        assert_eq!(state.strength.load(Ordering::Relaxed), 200);
+
+        apply_settings(&state, "flakes=99999\n");
+        assert_eq!(state.target_flakes.load(Ordering::Relaxed), 3000);
+    }
+
+    #[test]
+    fn fps() {
+        let state = AppState::new();
+        apply_settings(&state, "fps=60\n");
+        assert_eq!(state.target_fps.load(Ordering::Relaxed), 60);
+
+        let state2 = AppState::new();
+        apply_settings(&state2, "fps=45\n");
+        assert_eq!(state2.target_fps.load(Ordering::Relaxed), 30);
+    }
+
+    #[test]
+    fn bools() {
+        let state = AppState::new();
+        apply_settings(&state, "height_limit=0\nacc_ground=1\n");
+        assert!(!state.height_limit.load(Ordering::Relaxed));
+        assert!(state.acc_ground.load(Ordering::Relaxed));
+
+        apply_settings(&state, "acc_ground=7\n");
+        assert!(state.acc_ground.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn garbage() {
+        let state = AppState::new();
+        apply_settings(
+            &state,
+            "abc\n=\nflakes=notanumber\nunknown=5\n\n  opacity = 50  \n",
+        );
+        assert_eq!(state.opacity.load(Ordering::Relaxed), 50);
+        assert_eq!(state.target_flakes.load(Ordering::Relaxed), 400);
+    }
+
+    #[test]
+    fn roundtrip() {
+        let a = AppState::new();
+        a.target_flakes.store(500, Ordering::Relaxed);
+        a.target_fps.store(60, Ordering::Relaxed);
+        a.opacity.store(80, Ordering::Relaxed);
+        a.height_limit.store(false, Ordering::Relaxed);
+        a.acc_ground.store(true, Ordering::Relaxed);
+        a.strength.store(150, Ordering::Relaxed);
+
+        let text = format_settings(&a);
+        let b = AppState::new();
+        apply_settings(&b, &text);
+
+        assert_eq!(snapshot(&a), snapshot(&b));
+    }
+}
