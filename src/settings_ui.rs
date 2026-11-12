@@ -1,31 +1,29 @@
 //! Settings UI module for snowfall configuration window.
 
+use crate::tray::AppState;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use windows::Win32::Foundation::{HWND, WPARAM, LPARAM, LRESULT, HINSTANCE, RECT, COLORREF};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateCompatibleBitmap, CreateSolidBrush, CreateFontW, CreatePen,
-    DeleteDC, DeleteObject, SelectObject, BitBlt, FillRect, SetBkMode, SetTextColor,
-    DrawTextW, InvalidateRect, BeginPaint, EndPaint, DRAW_TEXT_FORMAT,
-    HGDIOBJ, TRANSPARENT, DT_CENTER, DT_VCENTER, DT_SINGLELINE, DT_LEFT,
-    FW_NORMAL, FW_BOLD, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH,
-    RoundRect, Ellipse, Pie, MoveToEx, LineTo, PS_SOLID
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
+    CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect,
+    InvalidateRect, LineTo, MoveToEx, Pie, RoundRect, SelectObject, SetBkMode, SetTextColor,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DRAW_TEXT_FORMAT,
+    DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FW_BOLD, FW_NORMAL, HGDIOBJ, OUT_DEFAULT_PRECIS,
+    PS_SOLID, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, RegisterClassW, WNDCLASSW, ShowWindow,
-    SW_SHOW, SW_HIDE, IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW,
-    GetWindowLongPtrW, GWLP_USERDATA, SetTimer, KillTimer,
-    GetClientRect, AdjustWindowRectEx, GetWindowRect, SetWindowPos,
-    SystemParametersInfoW, SPI_GETWORKAREA,
-    WS_POPUP, WS_CAPTION, WS_SYSMENU, WS_EX_TOPMOST, WS_EX_TOOLWINDOW,
-    HWND_TOPMOST, SWP_NOSIZE, SWP_NOACTIVATE,
-    WM_CLOSE, WM_DESTROY, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_LBUTTONUP, WM_PAINT, WM_TIMER, WM_CREATE, WM_ERASEBKGND,
-    LoadCursorW, LoadIconW, IDC_ARROW
+    AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, GetClientRect, GetWindowLongPtrW,
+    GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW, LoadIconW, RegisterClassW,
+    SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    SystemParametersInfoW, GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW, SPI_GETWORKAREA, SWP_NOACTIVATE,
+    SWP_NOSIZE, SW_HIDE, SW_SHOW, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_TIMER, WNDCLASSW, WS_CAPTION, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP, WS_SYSMENU,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{SetCapture, ReleaseCapture};
-use crate::tray::AppState;
 
 // Layout constants
 const MARGIN_X: i32 = 20;
@@ -106,6 +104,7 @@ pub fn toggle(state: &Arc<AppState>) {
     }
 }
 
+#[allow(clippy::manual_dangling_ptr)]
 pub fn create_hidden(state: &Arc<AppState>) {
     let hwnd_val = state.settings_hwnd.load(Ordering::Acquire);
     if hwnd_val != 0 {
@@ -116,6 +115,7 @@ pub fn create_hidden(state: &Arc<AppState>) {
         let class_name = windows::core::w!("SnowfallSettings");
 
         let hcursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
+        // 1 is a MAKEINTRESOURCE icon id, not a dangling pointer
         let hicon = GetModuleHandleW(None)
             .and_then(|h| LoadIconW(h, windows::core::PCWSTR(1 as *const u16)))
             .unwrap_or_default();
@@ -135,7 +135,12 @@ pub fn create_hidden(state: &Arc<AppState>) {
 
         let _ = RegisterClassW(&wnd_class);
 
-        let mut rect = RECT { left: 0, top: 0, right: CLIENT_WIDTH, bottom: CLIENT_HEIGHT };
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: CLIENT_WIDTH,
+            bottom: CLIENT_HEIGHT,
+        };
         let ex_style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
         let style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
         let _ = AdjustWindowRectEx(&mut rect, style, false, ex_style);
@@ -147,16 +152,20 @@ pub fn create_hidden(state: &Arc<AppState>) {
             class_name,
             windows::core::w!("Snowfall Settings"),
             style,
-            -32000, -32000,
+            -32000,
+            -32000,
             width,
             height,
             None,
             None,
             hinstance,
             None,
-        ).expect("Failed to create settings window");
+        )
+        .expect("Failed to create settings window");
 
-        state.settings_hwnd.store(hwnd.0 as usize, Ordering::Release);
+        state
+            .settings_hwnd
+            .store(hwnd.0 as usize, Ordering::Release);
 
         let settings_data = Box::new(SettingsData {
             state: state.clone(),
@@ -178,7 +187,12 @@ pub fn create_hidden(state: &Arc<AppState>) {
     }
 }
 
-unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn settings_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_CREATE => {
             let _ = SetTimer(hwnd, 1, 250, None);
@@ -190,9 +204,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             }
             LRESULT(0)
         }
-        WM_ERASEBKGND => {
-            LRESULT(1)
-        }
+        WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
             let mut ps = windows::Win32::Graphics::Gdi::PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
@@ -217,7 +229,17 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 draw_content(mem_dc, &data.state);
             }
 
-            let _ = BitBlt(hdc, 0, 0, cx, cy, mem_dc, 0, 0, windows::Win32::Graphics::Gdi::SRCCOPY);
+            let _ = BitBlt(
+                hdc,
+                0,
+                0,
+                cx,
+                cy,
+                mem_dc,
+                0,
+                0,
+                windows::Win32::Graphics::Gdi::SRCCOPY,
+            );
 
             SelectObject(mem_dc, old_bmp);
             let _ = DeleteObject(HGDIOBJ(hbmp.0));
@@ -290,26 +312,41 @@ fn fps_btn_rect(fps: usize) -> RECT {
         _ => 1,
     };
     let x = 160 + (idx * 50);
-    RECT { left: x, top: FPS_TOP, right: x + 45, bottom: FPS_TOP + 40 }
+    RECT {
+        left: x,
+        top: FPS_TOP,
+        right: x + 45,
+        bottom: FPS_TOP + 40,
+    }
 }
 
 fn pause_btn_rect() -> RECT {
-    RECT { left: 20, top: BUTTON_TOP, right: 160, bottom: BUTTON_TOP + 40 }
+    RECT {
+        left: 20,
+        top: BUTTON_TOP,
+        right: 160,
+        bottom: BUTTON_TOP + 40,
+    }
 }
 
 fn clear_btn_rect() -> RECT {
-    RECT { left: 180, top: BUTTON_TOP, right: 320, bottom: BUTTON_TOP + 40 }
+    RECT {
+        left: 180,
+        top: BUTTON_TOP,
+        right: 320,
+        bottom: BUTTON_TOP + 40,
+    }
 }
 
 fn hit_test_slider(x: i32, y: i32) -> Option<SliderKind> {
-    if x >= MARGIN_X && x <= MARGIN_X + TRACK_WIDTH {
-        if y >= SLIDER1_TOP && y < SLIDER1_TOP + ROW_HEIGHT {
+    if (MARGIN_X..=MARGIN_X + TRACK_WIDTH).contains(&x) {
+        if (SLIDER1_TOP..SLIDER1_TOP + ROW_HEIGHT).contains(&y) {
             return Some(SliderKind::Intensity);
         }
-        if y >= SLIDER2_TOP && y < SLIDER2_TOP + ROW_HEIGHT {
+        if (SLIDER2_TOP..SLIDER2_TOP + ROW_HEIGHT).contains(&y) {
             return Some(SliderKind::Opacity);
         }
-        if y >= SLIDER3_TOP && y < SLIDER3_TOP + ROW_HEIGHT {
+        if (SLIDER3_TOP..SLIDER3_TOP + ROW_HEIGHT).contains(&y) {
             return Some(SliderKind::Strength);
         }
     }
@@ -333,12 +370,19 @@ fn update_slider_from_mouse(data: &SettingsData, slider: SliderKind, x: i32) {
         }
         SliderKind::Strength => {
             let val = 25 + (ratio * 175.0).round() as usize;
-            data.state.strength.store(val.clamp(25, 200), Ordering::Relaxed);
+            data.state
+                .strength
+                .store(val.clamp(25, 200), Ordering::Relaxed);
         }
     }
 }
 
-unsafe fn draw_text_str(hdc: windows::Win32::Graphics::Gdi::HDC, s: &str, rc: &mut RECT, format: DRAW_TEXT_FORMAT) {
+unsafe fn draw_text_str(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    s: &str,
+    rc: &mut RECT,
+    format: DRAW_TEXT_FORMAT,
+) {
     let mut utf16: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
     let _ = DrawTextW(hdc, &mut utf16, rc, format);
 }
@@ -357,18 +401,46 @@ unsafe fn draw_slider(
     let track_y = row_top + 32;
 
     // 1. Label above (title left, value right)
-    let mut title_rc = RECT { left: MARGIN_X, top: row_top + 5, right: MARGIN_X + 150, bottom: row_top + 25 };
+    let mut title_rc = RECT {
+        left: MARGIN_X,
+        top: row_top + 5,
+        right: MARGIN_X + 150,
+        bottom: row_top + 25,
+    };
     let _ = SetTextColor(hdc, COLORREF(0x00DEDEDE));
-    draw_text_str(hdc, title, &mut title_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        title,
+        &mut title_rc,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+    );
 
-    let mut val_rc = RECT { left: MARGIN_X + 150, top: row_top + 5, right: MARGIN_X + TRACK_WIDTH, bottom: row_top + 25 };
+    let mut val_rc = RECT {
+        left: MARGIN_X + 150,
+        top: row_top + 5,
+        right: MARGIN_X + TRACK_WIDTH,
+        bottom: row_top + 25,
+    };
     let _ = SetTextColor(hdc, COLORREF(0x007C8084));
-    draw_text_str(hdc, value_str, &mut val_rc, DRAW_TEXT_FORMAT(2) | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        value_str,
+        &mut val_rc,
+        DRAW_TEXT_FORMAT(2) | DT_VCENTER | DT_SINGLELINE,
+    );
 
     // 2. Track (6 px high rounded track, RGB 70,72,78 -> BGR 0x004E4846)
     let track_brush = CreateSolidBrush(COLORREF(0x004E4846));
     let old_brush = SelectObject(hdc, HGDIOBJ(track_brush.0));
-    let _ = RoundRect(hdc, track_left, track_y, track_right, track_y + TRACK_HEIGHT, TRACK_HEIGHT, TRACK_HEIGHT);
+    let _ = RoundRect(
+        hdc,
+        track_left,
+        track_y,
+        track_right,
+        track_y + TRACK_HEIGHT,
+        TRACK_HEIGHT,
+        TRACK_HEIGHT,
+    );
     SelectObject(hdc, old_brush);
     let _ = DeleteObject(HGDIOBJ(track_brush.0));
 
@@ -380,7 +452,15 @@ unsafe fn draw_slider(
     if fill_right > track_left {
         let fill_brush = CreateSolidBrush(COLORREF(0x00FFAA78));
         let old_brush2 = SelectObject(hdc, HGDIOBJ(fill_brush.0));
-        let _ = RoundRect(hdc, track_left, track_y, fill_right, track_y + TRACK_HEIGHT, TRACK_HEIGHT, TRACK_HEIGHT);
+        let _ = RoundRect(
+            hdc,
+            track_left,
+            track_y,
+            fill_right,
+            track_y + TRACK_HEIGHT,
+            TRACK_HEIGHT,
+            TRACK_HEIGHT,
+        );
         SelectObject(hdc, old_brush2);
         let _ = DeleteObject(HGDIOBJ(fill_brush.0));
     }
@@ -415,7 +495,11 @@ unsafe fn draw_tile(
 
     // Background brush: RGB(45,46,50) -> BGR 0x00322E2D
     let bg_brush = CreateSolidBrush(COLORREF(0x00322E2D));
-    let border_color = if is_on { COLORREF(0x00FFAA78) } else { COLORREF(0x008A8482) };
+    let border_color = if is_on {
+        COLORREF(0x00FFAA78)
+    } else {
+        COLORREF(0x008A8482)
+    };
     let pen = CreatePen(PS_SOLID, 1, border_color);
 
     let old_brush = SelectObject(hdc, HGDIOBJ(bg_brush.0));
@@ -429,7 +513,11 @@ unsafe fn draw_tile(
     let _ = DeleteObject(HGDIOBJ(bg_brush.0));
 
     // Icon and label color
-    let fg_color = if is_on { COLORREF(0x00FFFFFF) } else { COLORREF(0x008A8482) };
+    let fg_color = if is_on {
+        COLORREF(0x00FFFFFF)
+    } else {
+        COLORREF(0x008A8482)
+    };
     let pen_fg = CreatePen(PS_SOLID, 1, fg_color);
     let brush_fg = CreateSolidBrush(fg_color);
     let old_pen2 = SelectObject(hdc, HGDIOBJ(pen_fg.0));
@@ -444,19 +532,31 @@ unsafe fn draw_tile(
         "windows" => {
             let _ = RoundRect(hdc, icon_l, icon_t, icon_r, icon_b, 4, 4);
             let bar_brush = CreateSolidBrush(fg_color);
-            let bar_rect = RECT { left: icon_l, top: icon_t, right: icon_r, bottom: icon_t + 5 };
+            let bar_rect = RECT {
+                left: icon_l,
+                top: icon_t,
+                right: icon_r,
+                bottom: icon_t + 5,
+            };
             let _ = FillRect(hdc, &bar_rect, bar_brush);
             let _ = DeleteObject(HGDIOBJ(bar_brush.0));
         }
         "dock" => {
             let _ = RoundRect(hdc, icon_l, icon_t, icon_r, icon_b, 4, 4);
             let bar_brush = CreateSolidBrush(fg_color);
-            let bar_rect = RECT { left: icon_l, top: icon_b - 7, right: icon_r, bottom: icon_b };
+            let bar_rect = RECT {
+                left: icon_l,
+                top: icon_b - 7,
+                right: icon_r,
+                bottom: icon_b,
+            };
             let _ = FillRect(hdc, &bar_rect, bar_brush);
             let _ = DeleteObject(HGDIOBJ(bar_brush.0));
         }
         "ground" => {
-            let _ = Pie(hdc, icon_l, icon_t, icon_r, icon_b, icon_r, icon_b, icon_l, icon_b);
+            let _ = Pie(
+                hdc, icon_l, icon_t, icon_r, icon_b, icon_r, icon_b, icon_l, icon_b,
+            );
             let _ = MoveToEx(hdc, icon_l, icon_b, None);
             let _ = LineTo(hdc, icon_r, icon_b);
         }
@@ -469,10 +569,20 @@ unsafe fn draw_tile(
     let _ = DeleteObject(HGDIOBJ(pen_fg.0));
 
     // Label at bottom
-    let mut label_rc = RECT { left: left + 5, top: top + 36, right: right - 5, bottom: bottom - 4 };
+    let mut label_rc = RECT {
+        left: left + 5,
+        top: top + 36,
+        right: right - 5,
+        bottom: bottom - 4,
+    };
     let _ = SetTextColor(hdc, fg_color);
     SelectObject(hdc, hfont_normal);
-    draw_text_str(hdc, title, &mut label_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        title,
+        &mut label_rc,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
 }
 
 unsafe fn draw_switch(
@@ -486,10 +596,20 @@ unsafe fn draw_switch(
     let row_right = MARGIN_X + TRACK_WIDTH;
 
     // Label on the left
-    let mut title_rc = RECT { left: row_left, top: row_top, right: row_left + 220, bottom: row_top + SWITCH_ROW_HEIGHT };
+    let mut title_rc = RECT {
+        left: row_left,
+        top: row_top,
+        right: row_left + 220,
+        bottom: row_top + SWITCH_ROW_HEIGHT,
+    };
     let _ = SetTextColor(hdc, COLORREF(0x00DEDEDE));
     SelectObject(hdc, hfont_normal);
-    draw_text_str(hdc, title, &mut title_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        title,
+        &mut title_rc,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+    );
 
     // Pill switch on the right
     let switch_l = row_right - SWITCH_WIDTH;
@@ -497,13 +617,25 @@ unsafe fn draw_switch(
     let switch_r = row_right;
     let switch_b = switch_t + SWITCH_HEIGHT;
 
-    let track_color = if is_on { COLORREF(0x00FFAA78) } else { COLORREF(0x004E4846) };
+    let track_color = if is_on {
+        COLORREF(0x00FFAA78)
+    } else {
+        COLORREF(0x004E4846)
+    };
     let track_brush = CreateSolidBrush(track_color);
     let pen_null = CreatePen(PS_SOLID, 1, track_color);
     let old_brush = SelectObject(hdc, HGDIOBJ(track_brush.0));
     let old_pen = SelectObject(hdc, HGDIOBJ(pen_null.0));
 
-    let _ = RoundRect(hdc, switch_l, switch_t, switch_r, switch_b, SWITCH_HEIGHT, SWITCH_HEIGHT);
+    let _ = RoundRect(
+        hdc,
+        switch_l,
+        switch_t,
+        switch_r,
+        switch_b,
+        SWITCH_HEIGHT,
+        SWITCH_HEIGHT,
+    );
 
     SelectObject(hdc, old_pen);
     SelectObject(hdc, old_brush);
@@ -530,9 +662,14 @@ unsafe fn draw_switch(
 
 unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState) {
     let hfont_normal = CreateFontW(
-        15, 0, 0, 0,
+        15,
+        0,
+        0,
+        0,
         FW_NORMAL.0 as i32,
-        0, 0, 0,
+        0,
+        0,
+        0,
         DEFAULT_CHARSET.0 as u32,
         OUT_DEFAULT_PRECIS.0 as u32,
         CLIP_DEFAULT_PRECIS.0 as u32,
@@ -541,9 +678,14 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
         windows::core::w!("Segoe UI"),
     );
     let hfont_bold = CreateFontW(
-        15, 0, 0, 0,
+        15,
+        0,
+        0,
+        0,
         FW_BOLD.0 as i32,
-        0, 0, 0,
+        0,
+        0,
+        0,
         DEFAULT_CHARSET.0 as u32,
         OUT_DEFAULT_PRECIS.0 as u32,
         CLIP_DEFAULT_PRECIS.0 as u32,
@@ -584,13 +726,31 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
     // Draw Strength slider
     let strength = state.strength.load(Ordering::Relaxed) as f32;
     let strength_str = format!("{}%", strength as usize);
-    draw_slider(hdc, "Strength", &strength_str, SLIDER3_TOP, 25.0, 200.0, strength);
+    draw_slider(
+        hdc,
+        "Strength",
+        &strength_str,
+        SLIDER3_TOP,
+        25.0,
+        200.0,
+        strength,
+    );
 
     // Accumulate header
-    let mut acc_header_rc = RECT { left: MARGIN_X, top: ACC_HEADER_TOP, right: MARGIN_X + TRACK_WIDTH, bottom: ACC_HEADER_TOP + 20 };
+    let mut acc_header_rc = RECT {
+        left: MARGIN_X,
+        top: ACC_HEADER_TOP,
+        right: MARGIN_X + TRACK_WIDTH,
+        bottom: ACC_HEADER_TOP + 20,
+    };
     let _ = SetTextColor(hdc, COLORREF(0x00DEDEDE));
     SelectObject(hdc, HGDIOBJ(hfont_bold.0));
-    draw_text_str(hdc, "Accumulate", &mut acc_header_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        "Accumulate",
+        &mut acc_header_rc,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+    );
 
     // Accumulate tiles
     let acc_w = state.acc_windows.load(Ordering::Relaxed);
@@ -601,29 +761,79 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
     let t1_l = t0_l + TILE_WIDTH + TILE_GAP;
     let t2_l = t1_l + TILE_WIDTH + TILE_GAP;
 
-    draw_tile(hdc, "Windows", acc_w, t0_l, TILES_TOP, HGDIOBJ(hfont_normal.0), "windows");
-    draw_tile(hdc, "Dock", acc_d, t1_l, TILES_TOP, HGDIOBJ(hfont_normal.0), "dock");
-    draw_tile(hdc, "Ground", acc_g, t2_l, TILES_TOP, HGDIOBJ(hfont_normal.0), "ground");
+    draw_tile(
+        hdc,
+        "Windows",
+        acc_w,
+        t0_l,
+        TILES_TOP,
+        HGDIOBJ(hfont_normal.0),
+        "windows",
+    );
+    draw_tile(
+        hdc,
+        "Dock",
+        acc_d,
+        t1_l,
+        TILES_TOP,
+        HGDIOBJ(hfont_normal.0),
+        "dock",
+    );
+    draw_tile(
+        hdc,
+        "Ground",
+        acc_g,
+        t2_l,
+        TILES_TOP,
+        HGDIOBJ(hfont_normal.0),
+        "ground",
+    );
 
     // Height limit switch
     let height_lmt = state.height_limit.load(Ordering::Relaxed);
-    draw_switch(hdc, "Height limit", height_lmt, SWITCH1_TOP, HGDIOBJ(hfont_normal.0));
+    draw_switch(
+        hdc,
+        "Height limit",
+        height_lmt,
+        SWITCH1_TOP,
+        HGDIOBJ(hfont_normal.0),
+    );
 
     // Mouse pushes snow switch
     let mouse_flk = state.mouse_flakes.load(Ordering::Relaxed);
-    draw_switch(hdc, "Mouse pushes snow", mouse_flk, SWITCH2_TOP, HGDIOBJ(hfont_normal.0));
+    draw_switch(
+        hdc,
+        "Mouse pushes snow",
+        mouse_flk,
+        SWITCH2_TOP,
+        HGDIOBJ(hfont_normal.0),
+    );
 
     // Frame rate row label
     let _ = SetTextColor(hdc, COLORREF(0x00DEDEDE));
-    let mut rc_fps = RECT { left: 20, top: FPS_TOP, right: 150, bottom: FPS_TOP + 40 };
+    let mut rc_fps = RECT {
+        left: 20,
+        top: FPS_TOP,
+        right: 150,
+        bottom: FPS_TOP + 40,
+    };
     SelectObject(hdc, HGDIOBJ(hfont_normal.0));
-    draw_text_str(hdc, "Frame rate", &mut rc_fps, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        "Frame rate",
+        &mut rc_fps,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+    );
 
     let current_fps = state.target_fps.load(Ordering::Relaxed);
     for &fps in &[20, 30, 60] {
         let r = fps_btn_rect(fps);
         let active = current_fps == fps;
-        let bg_color = if active { COLORREF(0x00F48442) } else { COLORREF(0x003A3D41) };
+        let bg_color = if active {
+            COLORREF(0x00F48442)
+        } else {
+            COLORREF(0x003A3D41)
+        };
         let brush = CreateSolidBrush(bg_color);
         let mut r_sys = r;
         FillRect(hdc, &r_sys, brush);
@@ -636,7 +846,12 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
             60 => "60",
             _ => "?",
         };
-        draw_text_str(hdc, text_str, &mut r_sys, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        draw_text_str(
+            hdc,
+            text_str,
+            &mut r_sys,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
     }
 
     // Pause / Resume button
@@ -648,7 +863,12 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
     let _ = DeleteObject(HGDIOBJ(p_brush.0));
     let _ = SetTextColor(hdc, COLORREF(0x00FFFFFF));
     let pause_str = if is_paused { "Resume" } else { "Pause" };
-    draw_text_str(hdc, pause_str, &mut p_sys, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        pause_str,
+        &mut p_sys,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
 
     // Clear snow button
     let clear_r = clear_btn_rect();
@@ -657,7 +877,12 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
     FillRect(hdc, &c_sys, c_brush);
     let _ = DeleteObject(HGDIOBJ(c_brush.0));
     let _ = SetTextColor(hdc, COLORREF(0x00FFFFFF));
-    draw_text_str(hdc, "Clear snow", &mut c_sys, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    draw_text_str(
+        hdc,
+        "Clear snow",
+        &mut c_sys,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
 
     SelectObject(hdc, old_font);
     let _ = DeleteObject(HGDIOBJ(hfont_normal.0));
@@ -673,7 +898,7 @@ fn handle_click(state: &AppState, x: i32, y: i32) -> bool {
     let t2_l = t1_r + TILE_GAP;
     let t2_r = t2_l + TILE_WIDTH;
 
-    if y >= TILES_TOP && y <= TILES_TOP + TILE_HEIGHT {
+    if (TILES_TOP..=TILES_TOP + TILE_HEIGHT).contains(&y) {
         if x >= t0_l && x <= t0_r {
             let cur = state.acc_windows.load(Ordering::Relaxed);
             state.acc_windows.store(!cur, Ordering::Relaxed);
@@ -692,13 +917,13 @@ fn handle_click(state: &AppState, x: i32, y: i32) -> bool {
     }
 
     // Check switches
-    if x >= MARGIN_X && x <= MARGIN_X + TRACK_WIDTH {
-        if y >= SWITCH1_TOP && y <= SWITCH1_TOP + SWITCH_ROW_HEIGHT {
+    if (MARGIN_X..=MARGIN_X + TRACK_WIDTH).contains(&x) {
+        if (SWITCH1_TOP..=SWITCH1_TOP + SWITCH_ROW_HEIGHT).contains(&y) {
             let cur = state.height_limit.load(Ordering::Relaxed);
             state.height_limit.store(!cur, Ordering::Relaxed);
             return true;
         }
-        if y >= SWITCH2_TOP && y <= SWITCH2_TOP + SWITCH_ROW_HEIGHT {
+        if (SWITCH2_TOP..=SWITCH2_TOP + SWITCH_ROW_HEIGHT).contains(&y) {
             let cur = state.mouse_flakes.load(Ordering::Relaxed);
             state.mouse_flakes.store(!cur, Ordering::Relaxed);
             return true;

@@ -1,25 +1,25 @@
 //! Overlay module for layered window and presentation.
 
+use crate::tray::AppState;
 use std::ffi::c_void;
 use std::sync::Arc;
-use windows::Win32::Foundation::{HWND, WPARAM, LPARAM, LRESULT, HINSTANCE, POINT, SIZE, COLORREF};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    HDC, HBITMAP, HGDIOBJ, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject,
-    GetDC, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
-    BLENDFUNCTION, AC_SRC_OVER, AC_SRC_ALPHA
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
+    AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
+    HBITMAP, HDC, HGDIOBJ,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetSystemMetrics, LoadCursorW, PeekMessageW, PostQuitMessage, RegisterClassW,
-    TranslateMessage, UnregisterClassW, ShowWindow, SW_SHOW, UpdateLayeredWindow,
-    ULW_ALPHA,
-    IDC_ARROW, MSG, PM_REMOVE, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, WM_CLOSE, WM_DESTROY, WM_HOTKEY,
-    WM_QUIT, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST,
-    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetSystemMetrics,
+    LoadCursorW, PeekMessageW, PostQuitMessage, RegisterClassW, ShowWindow, TranslateMessage,
+    UnregisterClassW, UpdateLayeredWindow, IDC_ARROW, MSG, PM_REMOVE, SM_CXVIRTUALSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_SHOW, ULW_ALPHA, WM_CLOSE,
+    WM_DESTROY, WM_HOTKEY, WM_QUIT, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, MOD_CONTROL, MOD_ALT};
-use crate::tray::AppState;
 
 pub struct Overlay {
     hwnd: HWND,
@@ -43,7 +43,9 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM
     match msg {
         WM_HOTKEY => {
             if wparam.0 == 1 {
-                unsafe { QUIT_REQUESTED = true; }
+                unsafe {
+                    QUIT_REQUESTED = true;
+                }
             }
             LRESULT(0)
         }
@@ -84,7 +86,11 @@ impl Overlay {
             let width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
             let height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 
-            let ex_style = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+            let ex_style = WS_EX_LAYERED
+                | WS_EX_TRANSPARENT
+                | WS_EX_TOPMOST
+                | WS_EX_TOOLWINDOW
+                | WS_EX_NOACTIVATE;
             let style = WS_POPUP;
 
             let hwnd = CreateWindowExW(
@@ -100,9 +106,11 @@ impl Overlay {
                 None,
                 hinstance,
                 None,
-            ).expect("Failed to create overlay window");
+            )
+            .expect("Failed to create overlay window");
 
-            crate::tracker::OVERLAY_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::Release);
+            crate::tracker::OVERLAY_HWND
+                .store(hwnd.0 as isize, std::sync::atomic::Ordering::Release);
 
             // Register global hotkey Ctrl+Alt+Q (ID 1)
             let _ = RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT, 0x51); // 0x51 is 'Q'
@@ -128,14 +136,8 @@ impl Overlay {
             };
 
             let mut bits_ptr: *mut c_void = std::ptr::null_mut();
-            let hbmp = CreateDIBSection(
-                hmem_dc,
-                &bmi,
-                DIB_RGB_COLORS,
-                &mut bits_ptr,
-                None,
-                0,
-            ).expect("Failed to create DIB section");
+            let hbmp = CreateDIBSection(hmem_dc, &bmi, DIB_RGB_COLORS, &mut bits_ptr, None, 0)
+                .expect("Failed to create DIB section");
 
             let old_bmp = SelectObject(hmem_dc, HGDIOBJ(hbmp.0));
 
@@ -170,8 +172,14 @@ impl Overlay {
 
         unsafe {
             let pt_src = POINT { x: 0, y: 0 };
-            let sz = SIZE { cx: self.width, cy: self.height };
-            let pt_dst = POINT { x: self.origin_x, y: self.origin_y };
+            let sz = SIZE {
+                cx: self.width,
+                cy: self.height,
+            };
+            let pt_dst = POINT {
+                x: self.origin_x,
+                y: self.origin_y,
+            };
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
                 BlendFlags: 0,
@@ -229,7 +237,10 @@ impl Drop for Overlay {
                 let _ = ReleaseDC(self.hwnd, self.hdc);
             }
             let _ = DestroyWindow(self.hwnd);
-            let _ = UnregisterClassW(windows::core::w!("SnowfallOverlayClass"), HINSTANCE(std::ptr::null_mut()));
+            let _ = UnregisterClassW(
+                windows::core::w!("SnowfallOverlayClass"),
+                HINSTANCE(std::ptr::null_mut()),
+            );
         }
     }
 }

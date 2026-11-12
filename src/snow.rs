@@ -1,9 +1,9 @@
 //! Snow module for flakes, piles, physics, and drawing.
 
+use crate::platform::Segment;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Stroke, Transform};
-use crate::platform::Segment;
 
 pub const GROUND_ID: isize = -1;
 
@@ -77,8 +77,6 @@ fn relax_range(heights: &mut [f32], lo: usize, hi: usize, max_slope: f32) -> boo
     changed
 }
 
-
-
 pub fn bgra(r: f32, g: f32, b: f32, a: f32) -> Color {
     Color::from_rgba(b, g, r, a).unwrap()
 }
@@ -115,7 +113,11 @@ pub struct Pile {
 }
 
 impl Pile {
-    pub fn update_cache(&mut self, owner: Option<isize>, owner_data: &HashMap<Option<isize>, OwnerData>) {
+    pub fn update_cache(
+        &mut self,
+        owner: Option<isize>,
+        owner_data: &HashMap<Option<isize>, OwnerData>,
+    ) {
         let intervals = if is_floor_like(owner) {
             vec![(self.x_start, self.x_start + self.heights.len() as f32 * 2.0)]
         } else {
@@ -150,7 +152,8 @@ impl Pile {
         while i < self.heights.len() {
             let col_x = self.x_start + i as f32 * 2.0 + 1.0;
             let h = self.heights[i];
-            let is_visible = h > 0.05 && intervals.iter().any(|&(v1, v2)| col_x >= v1 && col_x <= v2);
+            let is_visible =
+                h > 0.05 && intervals.iter().any(|&(v1, v2)| col_x >= v1 && col_x <= v2);
 
             if !is_visible {
                 i += 1;
@@ -165,7 +168,10 @@ impl Pile {
                 let next_i = end_idx + 1;
                 let next_col_x = self.x_start + next_i as f32 * 2.0 + 1.0;
                 let next_h = self.heights[next_i];
-                let next_visible = next_h > 0.05 && intervals.iter().any(|&(v1, v2)| next_col_x >= v1 && next_col_x <= v2);
+                let next_visible = next_h > 0.05
+                    && intervals
+                        .iter()
+                        .any(|&(v1, v2)| next_col_x >= v1 && next_col_x <= v2);
                 if next_visible {
                     end_idx = next_i;
                     if next_h > max_h {
@@ -227,12 +233,15 @@ impl Pile {
                 tiny_skia::Point::from_xy(run_start_x_all, self.y),
                 vec![
                     tiny_skia::GradientStop::new(0.0, bgra(1.0, 1.0, 1.0, 1.0)),
-                    tiny_skia::GradientStop::new(1.0, bgra(230.0/255.0, 238.0/255.0, 250.0/255.0, 1.0)),
+                    tiny_skia::GradientStop::new(
+                        1.0,
+                        bgra(230.0 / 255.0, 238.0 / 255.0, 250.0 / 255.0, 1.0),
+                    ),
                 ],
                 tiny_skia::SpreadMode::Pad,
                 Transform::identity(),
             ) {
-                self.cached_shader = Some(shader.into());
+                self.cached_shader = Some(shader);
             }
         } else {
             self.cached_shader = None;
@@ -304,7 +313,11 @@ impl Snow {
 
     fn landing_cap(height_limit: bool, owner: Option<isize>, pile_y: f32) -> f32 {
         if height_limit {
-            if is_floor_like(owner) { 36.0 } else { 16.0 }
+            if is_floor_like(owner) {
+                36.0
+            } else {
+                16.0
+            }
         } else {
             (pile_y - 8.0).max(36.0)
         }
@@ -312,7 +325,11 @@ impl Snow {
 
     fn hard_cap(height_limit: bool, owner: Option<isize>, pile_y: f32) -> f32 {
         if height_limit {
-            if is_floor_like(owner) { 60.0 } else { 32.0 }
+            if is_floor_like(owner) {
+                60.0
+            } else {
+                32.0
+            }
         } else {
             (pile_y - 8.0).max(36.0)
         }
@@ -413,10 +430,19 @@ impl Snow {
         }
     }
 
-    pub fn max_pile_height_under_cursor(&self, cx: f32, cy: f32, win_rects: &[(isize, tiny_skia::Rect)]) -> f32 {
+    pub fn max_pile_height_under_cursor(
+        &self,
+        cx: f32,
+        cy: f32,
+        win_rects: &[(isize, tiny_skia::Rect)],
+    ) -> f32 {
         let mut found_hwnd = None;
         for &(hwnd, ref rect) in win_rects.iter().rev() {
-            if cx >= rect.x() && cx <= rect.x() + rect.width() && cy >= rect.y() && cy <= rect.y() + rect.height() {
+            if cx >= rect.x()
+                && cx <= rect.x() + rect.width()
+                && cy >= rect.y()
+                && cy <= rect.y() + rect.height()
+            {
                 found_hwnd = Some(hwnd);
                 break;
             }
@@ -440,7 +466,11 @@ impl Snow {
     }
 
     pub fn start_clear(&mut self) {
-        let dir: f32 = if rand::thread_rng().gen_bool(0.5) { 1.0 } else { -1.0 };
+        let dir: f32 = if rand::thread_rng().gen_bool(0.5) {
+            1.0
+        } else {
+            -1.0
+        };
         self.clear_dir = dir;
         self.clearing = true;
         self.clear_front = if dir > 0.0 { 0.0 } else { self.width };
@@ -468,7 +498,7 @@ impl Snow {
             };
 
             let spacing = 12;
-            let num_controls = (len + spacing - 1) / spacing + 1;
+            let num_controls = len.div_ceil(spacing) + 1;
             let mut controls = Vec::with_capacity(num_controls);
             for _ in 0..num_controls {
                 controls.push(rng.gen_range(min_h..max_h));
@@ -488,6 +518,7 @@ impl Snow {
         }
     }
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     fn create_sprites() -> Vec<Sprite> {
         let mut sprites = Vec::with_capacity(128);
         for i in 0..8 {
@@ -515,7 +546,13 @@ impl Snow {
                 if let Some(shader) = radial_shader {
                     paint.shader = shader;
                 }
-                base_sprite.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                base_sprite.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    None,
+                );
             }
 
             let base_data = base_sprite.data();
@@ -700,11 +737,12 @@ impl Snow {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn distribute_berm(
         berm_amt: f32,
         start_c: isize,
         step: isize,
-        pile_heights: &mut Vec<f32>,
+        pile_heights: &mut [f32],
         min_c_ref: &mut usize,
         max_c_ref: &mut usize,
         full_l: f32,
@@ -725,9 +763,9 @@ impl Snow {
         let mut rng = rand::thread_rng();
         let mut sum_weights = 0.0f32;
         let mut weights = vec![0.0f32; w_cols];
-        for k in 0..w_cols {
+        for (k, weight) in weights.iter_mut().enumerate().take(w_cols) {
             let w = 0.5 * (1.0 + (std::f32::consts::PI * k as f32 / w_cols as f32).cos());
-            weights[k] = w;
+            *weight = w;
             sum_weights += w;
         }
         if sum_weights > 0.0 {
@@ -737,8 +775,8 @@ impl Snow {
         }
 
         let len = pile_heights.len() as isize;
-        for k in 0..w_cols {
-            let amt = berm_amt * weights[k];
+        for (k, &w) in weights.iter().enumerate().take(w_cols) {
+            let amt = berm_amt * w;
             let target_col = start_c + (k as isize) * step;
             if target_col >= 0 && target_col < len {
                 let idx = target_col as usize;
@@ -751,7 +789,8 @@ impl Snow {
                         let col_x = pile_x_start + idx as f32 * 2.0 + 1.0;
                         let surface_y = base_y - max_allowed;
                         let bvx = if dir != 0 {
-                            ((dir as f32) * (30.0 + 0.1 * speed)).clamp(-350.0, 350.0) + rng.gen_range(-40.0..40.0)
+                            ((dir as f32) * (30.0 + 0.1 * speed)).clamp(-350.0, 350.0)
+                                + rng.gen_range(-40.0..40.0)
                         } else {
                             let s_sign = (col_x - cx).signum();
                             let s_sign = if s_sign == 0.0 { 1.0 } else { s_sign };
@@ -841,7 +880,8 @@ impl Snow {
                 let patch_w = rng.gen_range(6..=12);
                 let half_width = patch_w as f32 / 2.0;
                 let start_c = (center_col as isize - half_width as isize).max(0) as usize;
-                let end_c = (center_col as isize + half_width as isize).min(pile.heights.len() as isize - 1) as usize;
+                let end_c = (center_col as isize + half_width as isize)
+                    .min(pile.heights.len() as isize - 1) as usize;
 
                 for c in start_c..=end_c {
                     let h = pile.heights[c];
@@ -862,16 +902,22 @@ impl Snow {
                             let surface_y = pile.y - (h - reduction);
                             let bvx = -wvx * 0.35 + rng.gen_range(-80.0..80.0);
                             let bvy = -wvy * 0.35 - rng.gen_range(20.0..120.0);
-                            self.scratch_spawn_actions.push((col_x, surface_y, bvx, bvy, owner));
+                            self.scratch_spawn_actions
+                                .push((col_x, surface_y, bvx, bvy, owner));
                         }
                     }
                 }
             }
 
-            if min_c <= max_c {
-                if relax_range(&mut pile.heights, min_c.saturating_sub(4), max_c + 4, MAX_SLOPE) {
-                    pile.dirty = true;
-                }
+            if min_c <= max_c
+                && relax_range(
+                    &mut pile.heights,
+                    min_c.saturating_sub(4),
+                    max_c + 4,
+                    MAX_SLOPE,
+                )
+            {
+                pile.dirty = true;
             }
         }
 
@@ -904,7 +950,14 @@ impl Snow {
         }
     }
 
-    pub fn brush(&mut self, cx: f32, cy: f32, cvx: f32, cvy: f32, win_rects: &[(isize, tiny_skia::Rect)]) {
+    pub fn brush(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        cvx: f32,
+        cvy: f32,
+        win_rects: &[(isize, tiny_skia::Rect)],
+    ) {
         let speed = (cvx * cvx + cvy * cvy).sqrt();
         if let Some(ref mut d) = self.brush_diag {
             d.speed_sum += speed;
@@ -925,7 +978,11 @@ impl Snow {
             let mut hidden = false;
             if is_floor_like(owner) {
                 for (_, rect) in win_rects {
-                    if cx >= rect.x() && cx <= rect.x() + rect.width() && cy >= rect.y() && cy <= rect.y() + rect.height() {
+                    if cx >= rect.x()
+                        && cx <= rect.x() + rect.width()
+                        && cy >= rect.y()
+                        && cy <= rect.y() + rect.height()
+                    {
                         hidden = true;
                         break;
                     }
@@ -933,9 +990,12 @@ impl Snow {
             } else {
                 if let Some(hwnd) = owner {
                     if let Some(pos) = win_rects.iter().position(|(h, _)| *h == hwnd) {
-                        for i in 0..pos {
-                            let rect = win_rects[i].1;
-                            if cx >= rect.x() && cx <= rect.x() + rect.width() && cy >= rect.y() && cy <= rect.y() + rect.height() {
+                        for (_, rect) in win_rects.iter().take(pos) {
+                            if cx >= rect.x()
+                                && cx <= rect.x() + rect.width()
+                                && cy >= rect.y()
+                                && cy <= rect.y() + rect.height()
+                            {
                                 hidden = true;
                                 break;
                             }
@@ -990,7 +1050,12 @@ impl Snow {
                         if let Some(ref mut d) = self.brush_diag {
                             d.snow_removed += floor_removed;
                         }
-                        let _ = relax_range(&mut pile.heights, min_c.saturating_sub(4), max_c + 4, MAX_SLOPE);
+                        let _ = relax_range(
+                            &mut pile.heights,
+                            min_c.saturating_sub(4),
+                            max_c + 4,
+                            MAX_SLOPE,
+                        );
                         pile.dirty = true;
                     }
                 } else {
@@ -1021,7 +1086,11 @@ impl Snow {
                         let col_x = pile.x_start + i as f32 * 2.0 + 1.0;
                         let dx = col_x - cx;
                         if dx.abs() < radius {
-                            let s = if radius * radius > dx * dx { (radius * radius - dx * dx).sqrt() } else { 0.0 };
+                            let s = if radius * radius > dx * dx {
+                                (radius * radius - dx * dx).sqrt()
+                            } else {
+                                0.0
+                            };
                             let surface = base - h;
                             if cy - s <= base && cy + s >= surface {
                                 let arc_h = (base - (cy + s)).max(0.0);
@@ -1043,11 +1112,16 @@ impl Snow {
 
                     if total_removed > 0.0 {
                         let speed_val = (cvx * cvx + cvy * cvy).sqrt();
-                        let dir = if cvx.abs() > 40.0 { cvx.signum() as i32 } else { 0 };
+                        let dir = if cvx.abs() > 40.0 {
+                            cvx.signum() as i32
+                        } else {
+                            0
+                        };
                         let fling_frac = ((speed_val - 600.0) / 1400.0).clamp(0.0, 0.8);
 
                         let thrown_part = total_removed * fling_frac;
-                        let flake_count = ((thrown_part / 1.5).round() as usize).min(40 - total_spawned);
+                        let flake_count =
+                            ((thrown_part / 1.5).round() as usize).min(40 - total_spawned);
                         let skip_hwnd = owner.unwrap_or(0);
                         for _ in 0..flake_count {
                             if touched_points.is_empty() || total_spawned >= 40 {
@@ -1056,14 +1130,24 @@ impl Snow {
                             let p_idx = rng.gen_range(0..touched_points.len());
                             let (col_x, surface_y, dx) = touched_points[p_idx];
                             let bvx = if dir != 0 {
-                                ((dir as f32) * (30.0 + 0.1 * speed_val)).clamp(-350.0, 350.0) + rng.gen_range(-40.0..40.0)
+                                ((dir as f32) * (30.0 + 0.1 * speed_val)).clamp(-350.0, 350.0)
+                                    + rng.gen_range(-40.0..40.0)
                             } else {
                                 let s_sign = (col_x - cx).signum();
-                                let s_sign = if s_sign == 0.0 { if dx >= 0.0 { 1.0 } else { -1.0 } } else { s_sign };
+                                let s_sign = if s_sign == 0.0 {
+                                    if dx >= 0.0 {
+                                        1.0
+                                    } else {
+                                        -1.0
+                                    }
+                                } else {
+                                    s_sign
+                                };
                                 s_sign * rng.gen_range(30.0..90.0)
                             };
                             let bvy = rng.gen_range(-20.0..40.0);
-                            self.scratch_spawn_actions.push((col_x, surface_y, bvx, bvy, skip_hwnd));
+                            self.scratch_spawn_actions
+                                .push((col_x, surface_y, bvx, bvy, skip_hwnd));
                             total_spawned += 1;
                         }
 
@@ -1075,7 +1159,8 @@ impl Snow {
                         let remaining_part = total_removed * (1.0 - fling_frac);
                         let o_data = self.owner_data.get(&owner);
                         let full_left = o_data.map_or(pile.x_start, |d| d.full_left);
-                        let full_right = o_data.map_or(pile.x_start + len as f32 * 2.0, |d| d.full_right);
+                        let full_right =
+                            o_data.map_or(pile.x_start + len as f32 * 2.0, |d| d.full_right);
 
                         let touched_columns = touched_points.len();
                         let w_cols = (1.5 * touched_columns as f32).max(24.0).round() as usize;
@@ -1084,19 +1169,87 @@ impl Snow {
                         if dir != 0 {
                             let edge_x = cx + (dir as f32) * radius;
                             let start_c = ((edge_x - pile.x_start - 1.0) / 2.0).round() as isize;
-                            Self::distribute_berm(remaining_part, start_c, dir as isize, &mut pile.heights, &mut min_c, &mut max_c, full_left, full_right, base, &mut self.scratch_curtain_actions, &mut self.scratch_spawn_actions, &mut total_spawned, plow_cap, &mut diag_ref, w_cols, skip_hwnd, cx, speed_val, dir, pile.x_start);
+                            Self::distribute_berm(
+                                remaining_part,
+                                start_c,
+                                dir as isize,
+                                &mut pile.heights,
+                                &mut min_c,
+                                &mut max_c,
+                                full_left,
+                                full_right,
+                                base,
+                                &mut self.scratch_curtain_actions,
+                                &mut self.scratch_spawn_actions,
+                                &mut total_spawned,
+                                plow_cap,
+                                &mut diag_ref,
+                                w_cols,
+                                skip_hwnd,
+                                cx,
+                                speed_val,
+                                dir,
+                                pile.x_start,
+                            );
                         } else {
                             let half_rem = remaining_part * 0.5;
                             let cx_col_b = ((cx - pile.x_start - 1.0) / 2.0).round() as isize;
-                            Self::distribute_berm(half_rem, cx_col_b, 1, &mut pile.heights, &mut min_c, &mut max_c, full_left, full_right, base, &mut self.scratch_curtain_actions, &mut self.scratch_spawn_actions, &mut total_spawned, plow_cap, &mut diag_ref, w_cols, skip_hwnd, cx, speed_val, dir, pile.x_start);
-                            Self::distribute_berm(half_rem, cx_col_b, -1, &mut pile.heights, &mut min_c, &mut max_c, full_left, full_right, base, &mut self.scratch_curtain_actions, &mut self.scratch_spawn_actions, &mut total_spawned, plow_cap, &mut diag_ref, w_cols, skip_hwnd, cx, speed_val, dir, pile.x_start);
+                            Self::distribute_berm(
+                                half_rem,
+                                cx_col_b,
+                                1,
+                                &mut pile.heights,
+                                &mut min_c,
+                                &mut max_c,
+                                full_left,
+                                full_right,
+                                base,
+                                &mut self.scratch_curtain_actions,
+                                &mut self.scratch_spawn_actions,
+                                &mut total_spawned,
+                                plow_cap,
+                                &mut diag_ref,
+                                w_cols,
+                                skip_hwnd,
+                                cx,
+                                speed_val,
+                                dir,
+                                pile.x_start,
+                            );
+                            Self::distribute_berm(
+                                half_rem,
+                                cx_col_b,
+                                -1,
+                                &mut pile.heights,
+                                &mut min_c,
+                                &mut max_c,
+                                full_left,
+                                full_right,
+                                base,
+                                &mut self.scratch_curtain_actions,
+                                &mut self.scratch_spawn_actions,
+                                &mut total_spawned,
+                                plow_cap,
+                                &mut diag_ref,
+                                w_cols,
+                                skip_hwnd,
+                                cx,
+                                speed_val,
+                                dir,
+                                pile.x_start,
+                            );
                         }
                         self.brush_diag = diag_ref;
 
-                        if min_c <= max_c {
-                            if relax_range(&mut pile.heights, min_c.saturating_sub(4), max_c + 4, 2.6) {
-                                pile.dirty = true;
-                            }
+                        if min_c <= max_c
+                            && relax_range(
+                                &mut pile.heights,
+                                min_c.saturating_sub(4),
+                                max_c + 4,
+                                2.6,
+                            )
+                        {
+                            pile.dirty = true;
                         }
                     }
                 }
@@ -1120,36 +1273,41 @@ impl Snow {
         let height_limit = self.height_limit;
         let strength = self.strength;
 
-        let global_wind = (self.wind_time * 0.6).sin() * 20.0 + (self.wind_time * 0.25).sin() * 35.0;
+        let global_wind =
+            (self.wind_time * 0.6).sin() * 20.0 + (self.wind_time * 0.25).sin() * 35.0;
         if self.clearing || self.clear_hold {
             self.clear_gust = 1.0;
         } else if self.clear_gust > 0.0 {
             self.clear_gust = (self.clear_gust - dt / 0.8).max(0.0);
         }
 
-        for (_, data) in self.owner_data.iter_mut() {
+        for data in self.owner_data.values_mut() {
             data.visible_intervals.clear();
         }
 
         self.scratch_current_owners.clear();
         for seg in segments {
             self.scratch_current_owners.insert(seg.owner);
-            let data = self.owner_data.entry(seg.owner).or_insert_with(|| OwnerData {
-                y: seg.y,
-                full_left: seg.full_left,
-                full_right: seg.full_right,
-                visible_intervals: Vec::new(),
-            });
+            let data = self
+                .owner_data
+                .entry(seg.owner)
+                .or_insert_with(|| OwnerData {
+                    y: seg.y,
+                    full_left: seg.full_left,
+                    full_right: seg.full_right,
+                    visible_intervals: Vec::new(),
+                });
             data.y = seg.y;
             data.full_left = seg.full_left;
             data.full_right = seg.full_right;
             data.visible_intervals.push((seg.x1, seg.x2));
         }
-        self.owner_data.retain(|owner, _| self.scratch_current_owners.contains(owner));
+        self.owner_data
+            .retain(|owner, _| self.scratch_current_owners.contains(owner));
 
         // 1. Remove piles whose owner is no longer present
         let mut owners_to_remove = Vec::new();
-        for (owner, _) in &self.piles {
+        for owner in self.piles.keys() {
             if !self.scratch_current_owners.contains(owner) {
                 owners_to_remove.push(*owner);
             }
@@ -1284,7 +1442,7 @@ impl Snow {
             let front = self.clear_front;
             let extra_count = self.flakes.iter().filter(|f| f.extra).count();
             let mut new_flakes = Vec::new();
-            for (_, pile) in self.piles.iter_mut() {
+            for pile in self.piles.values_mut() {
                 let mut changed = false;
                 for i in 0..pile.heights.len() {
                     let h = pile.heights[i];
@@ -1292,7 +1450,11 @@ impl Snow {
                         continue;
                     }
                     let col_x = pile.x_start + i as f32 * 2.0 + 1.0;
-                    let passed = if dir > 0.0 { col_x <= front } else { col_x >= front };
+                    let passed = if dir > 0.0 {
+                        col_x <= front
+                    } else {
+                        col_x >= front
+                    };
                     if !passed {
                         continue;
                     }
@@ -1329,7 +1491,9 @@ impl Snow {
                 }
             }
             self.flakes.extend(new_flakes);
-            if (dir > 0.0 && self.clear_front > self.width + 200.0) || (dir < 0.0 && self.clear_front < -200.0) {
+            if (dir > 0.0 && self.clear_front > self.width + 200.0)
+                || (dir < 0.0 && self.clear_front < -200.0)
+            {
                 self.clearing = false;
                 self.clear_front = 0.0;
             }
@@ -1352,7 +1516,11 @@ impl Snow {
         let dir_now = self.clear_dir;
 
         self.scratch_remove_indices.clear();
-        let alive_count = self.flakes.iter().filter(|f| !f.extra && f.fade_target > 0.0).count();
+        let alive_count = self
+            .flakes
+            .iter()
+            .filter(|f| !f.extra && f.fade_target > 0.0)
+            .count();
         for (i, flake) in self.flakes.iter_mut().enumerate() {
             if flake.fade < flake.fade_target {
                 flake.fade = (flake.fade + 1.5 * dt).min(flake.fade_target);
@@ -1369,7 +1537,11 @@ impl Snow {
             let sway = flake.sway_phase.sin() * (5.0 + flake.depth * 10.0);
             let effective_wind = global_wind * (0.5 + 0.5 * flake.depth);
             // A flake is swept by the clearing gust once the wave front has passed it
-            let passed_front = if dir_now > 0.0 { flake.x <= front_now } else { flake.x >= front_now };
+            let passed_front = if dir_now > 0.0 {
+                flake.x <= front_now
+            } else {
+                flake.x >= front_now
+            };
             let swept = hold && (!clearing_now || passed_front);
             if swept {
                 flake.bvx += CLEAR_GUST_WIND * 2.5 * dt * dir_now;
@@ -1380,14 +1552,18 @@ impl Snow {
                 let dir = if flake.depth < 0.7 { 1.0 } else { -1.0 };
                 let ang = flake.sway_phase * CLEAR_SWIRL_RATE * dir;
                 swirl_x = ang.cos() * CLEAR_SWIRL_SPEED * clear_gust;
-                swirl_y = (ang.sin() * CLEAR_SWIRL_SPEED + (flake.x * 0.008 - wind_time * 6.0 * dir_now).sin() * 300.0) * clear_gust;
+                swirl_y = (ang.sin() * CLEAR_SWIRL_SPEED
+                    + (flake.x * 0.008 - wind_time * 6.0 * dir_now).sin() * 300.0)
+                    * clear_gust;
             }
-            flake.x += (flake.vx * strength + (effective_wind + sway) * strength + flake.bvx + swirl_x) * dt;
+            flake.x +=
+                (flake.vx * strength + (effective_wind + sway) * strength + flake.bvx + swirl_x)
+                    * dt;
             flake.y += (flake.vy * strength + flake.bvy + swirl_y) * dt;
 
             if flake.extra && flake.ballistic > 0.0 {
                 flake.bvy += 520.0 * dt;
-                flake.bvx *= (-1.0 * dt).exp();
+                flake.bvx *= (-dt).exp();
                 flake.bvy *= (-0.8 * dt).exp();
                 flake.ballistic -= dt;
                 if flake.ballistic <= 0.0 {
@@ -1419,8 +1595,10 @@ impl Snow {
                                     // let the flake fall down to the base line.
                                     let probe_y = pile.y - 1.0;
                                     let hidden = self.window_rects.iter().any(|(_, r)| {
-                                        flake.x >= r.x() && flake.x <= r.x() + r.width()
-                                            && probe_y >= r.y() && probe_y <= r.y() + r.height()
+                                        flake.x >= r.x()
+                                            && flake.x <= r.x() + r.width()
+                                            && probe_y >= r.y()
+                                            && probe_y <= r.y() + r.height()
                                     });
                                     if hidden {
                                         surface_y = pile.y - 1.0;
@@ -1452,23 +1630,31 @@ impl Snow {
 
                         if target_col > 0 {
                             let c_left = target_col - 1;
-                            pile.heights[c_left] = (pile.heights[c_left] + 0.25 * amount).min(max_h);
+                            pile.heights[c_left] =
+                                (pile.heights[c_left] + 0.25 * amount).min(max_h);
                             touched_min = touched_min.min(c_left);
                             touched_max = touched_max.max(c_left);
                         }
 
-                        pile.heights[target_col] = (pile.heights[target_col] + 0.5 * amount).min(max_h);
+                        pile.heights[target_col] =
+                            (pile.heights[target_col] + 0.5 * amount).min(max_h);
                         touched_min = touched_min.min(target_col);
                         touched_max = touched_max.max(target_col);
 
                         if target_col + 1 < len {
                             let c_right = target_col + 1;
-                            pile.heights[c_right] = (pile.heights[c_right] + 0.25 * amount).min(max_h);
+                            pile.heights[c_right] =
+                                (pile.heights[c_right] + 0.25 * amount).min(max_h);
                             touched_min = touched_min.min(c_right);
                             touched_max = touched_max.max(c_right);
                         }
 
-                        let _ = relax_range(&mut pile.heights, touched_min.saturating_sub(4), touched_max + 4, MAX_SLOPE);
+                        let _ = relax_range(
+                            &mut pile.heights,
+                            touched_min.saturating_sub(4),
+                            touched_max + 4,
+                            MAX_SLOPE,
+                        );
                         pile.dirty = true;
                     }
                 }
@@ -1480,7 +1666,11 @@ impl Snow {
                     flake.x = rng.gen_range(0.0..self.width);
                     let depth = rng.gen_range(0.0..1.0);
                     flake.depth = depth;
-                    flake.r = if depth < 0.5 { rng.gen_range(0.8..1.5) } else { rng.gen_range(2.5..4.0) };
+                    flake.r = if depth < 0.5 {
+                        rng.gen_range(0.8..1.5)
+                    } else {
+                        rng.gen_range(2.5..4.0)
+                    };
                     flake.bucket_idx = Self::get_bucket_idx(flake.r);
                     flake.vy = 40.0 + depth * 100.0;
                     flake.bvx = 0.0;
@@ -1491,7 +1681,10 @@ impl Snow {
                 } else {
                     flake.fade_target = 0.0;
                 }
-            } else if flake.x < -flake.r || flake.x > self.width + flake.r || flake.y > self.height + flake.r {
+            } else if flake.x < -flake.r
+                || flake.x > self.width + flake.r
+                || flake.y > self.height + flake.r
+            {
                 if flake.extra {
                     self.scratch_remove_indices.push(i);
                 } else if !hold && alive_count <= self.target_flake_count {
@@ -1499,7 +1692,11 @@ impl Snow {
                     flake.x = rng.gen_range(0.0..self.width);
                     let depth = rng.gen_range(0.0..1.0);
                     flake.depth = depth;
-                    flake.r = if depth < 0.5 { rng.gen_range(0.8..1.5) } else { rng.gen_range(2.5..4.0) };
+                    flake.r = if depth < 0.5 {
+                        rng.gen_range(0.8..1.5)
+                    } else {
+                        rng.gen_range(2.5..4.0)
+                    };
                     flake.bucket_idx = Self::get_bucket_idx(flake.r);
                     flake.vy = 40.0 + depth * 100.0;
                     flake.bvx = 0.0;
@@ -1514,14 +1711,19 @@ impl Snow {
         }
 
         if !self.scratch_remove_indices.is_empty() {
-            self.scratch_remove_indices.sort_unstable_by(|a, b| b.cmp(a));
+            self.scratch_remove_indices
+                .sort_unstable_by(|a, b| b.cmp(a));
             for &idx in &self.scratch_remove_indices {
                 self.flakes.swap_remove(idx);
             }
         }
 
         // 4. Intensity decrease
-        let alive_count = self.flakes.iter().filter(|f| !f.extra && f.fade_target > 0.0).count();
+        let alive_count = self
+            .flakes
+            .iter()
+            .filter(|f| !f.extra && f.fade_target > 0.0)
+            .count();
         if alive_count > self.target_flake_count {
             let excess = alive_count - self.target_flake_count;
             let n = ((excess as f32 * (1.0 - (-dt / 1.5).exp())).ceil() as usize).min(alive_count);
@@ -1538,16 +1740,28 @@ impl Snow {
         }
 
         // 5. Intensity increase
-        let mut current_alive = self.flakes.iter().filter(|f| !f.extra && f.fade_target > 0.0).count();
+        let mut current_alive = self
+            .flakes
+            .iter()
+            .filter(|f| !f.extra && f.fade_target > 0.0)
+            .count();
         while !hold && current_alive < self.target_flake_count {
             let depth = rng.gen_range(0.0..1.0);
-            let r = if depth < 0.5 { rng.gen_range(0.8..1.5) } else { rng.gen_range(2.5..4.0) };
+            let r = if depth < 0.5 {
+                rng.gen_range(0.8..1.5)
+            } else {
+                rng.gen_range(2.5..4.0)
+            };
             let bucket_idx = Self::get_bucket_idx(r);
             let vy = 40.0 + depth * 100.0;
             let alpha = 0.3 + depth * 0.65;
             self.flakes.push(Flake {
                 x: rng.gen_range(0.0..self.width),
-                y: if self.refill_from_top { rng.gen_range((-0.4 * self.height)..0.0) } else { rng.gen_range((-0.1 * self.height)..self.height) },
+                y: if self.refill_from_top {
+                    rng.gen_range((-0.4 * self.height)..0.0)
+                } else {
+                    rng.gen_range((-0.1 * self.height)..self.height)
+                },
                 vx: rng.gen_range(-10.0..10.0),
                 vy,
                 bvx: 0.0,
@@ -1613,10 +1827,15 @@ impl Snow {
                         if spill_flakes_count < 24 {
                             spill_flakes_count += 1;
                             let nearest_is_left = left_dist < right_dist;
-                            let edge_x = if nearest_is_left { full_left } else { full_right };
+                            let edge_x = if nearest_is_left {
+                                full_left
+                            } else {
+                                full_right
+                            };
                             let outward = if nearest_is_left { -1.0 } else { 1.0 };
                             let y = pile.y - cap;
-                            self.scratch_curtain_actions.push((edge_x, y, outward, excess));
+                            self.scratch_curtain_actions
+                                .push((edge_x, y, outward, excess));
                         }
                     }
                 } else {
@@ -1629,10 +1848,15 @@ impl Snow {
                 }
             }
 
-            if pile_modified {
-                if relax_range(&mut pile.heights, min_c.saturating_sub(4), max_c + 4, MAX_SLOPE) {
-                    pile.dirty = true;
-                }
+            if pile_modified
+                && relax_range(
+                    &mut pile.heights,
+                    min_c.saturating_sub(4),
+                    max_c + 4,
+                    MAX_SLOPE,
+                )
+            {
+                pile.dirty = true;
             }
         }
 
@@ -1650,7 +1874,13 @@ impl Snow {
         if let Some(ref shadow_path) = pile.cached_shadow_path {
             let mut paint = Paint::default();
             paint.set_color(bgra(0.0, 0.0, 0.0, 0.18));
-            pixmap.fill_path(shadow_path, &paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(
+                shadow_path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
         }
         if let Some(ref body_path) = pile.cached_body_path {
             let mut paint = Paint::default();
@@ -1659,13 +1889,21 @@ impl Snow {
             } else {
                 paint.set_color(bgra(1.0, 1.0, 1.0, 1.0));
             }
-            pixmap.fill_path(body_path, &paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(
+                body_path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
         }
         if let Some(ref top_path) = pile.cached_top_path {
             let mut paint = Paint::default();
             paint.set_color(bgra(1.0, 1.0, 1.0, 0.85));
-            let mut stroke = Stroke::default();
-            stroke.width = 1.5;
+            let stroke = Stroke {
+                width: 1.5,
+                ..Default::default()
+            };
             pixmap.stroke_path(top_path, &paint, &stroke, Transform::identity(), None);
         }
     }
@@ -1679,13 +1917,21 @@ impl Snow {
         }
 
         for &(hwnd, ref rect) in win_rects.iter().rev() {
-            let mut clear_paint = Paint::default();
-            clear_paint.blend_mode = tiny_skia::BlendMode::Clear;
-            clear_paint.anti_alias = false;
+            let clear_paint = Paint {
+                blend_mode: tiny_skia::BlendMode::Clear,
+                anti_alias: false,
+                ..Default::default()
+            };
             let mut pb = PathBuilder::new();
             pb.push_rect(*rect);
             if let Some(path) = pb.finish() {
-                pixmap.fill_path(&path, &clear_paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(
+                    &path,
+                    &clear_paint,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    None,
+                );
             }
 
             if let Some(pile) = self.piles.get(&Some(hwnd)) {
@@ -1758,8 +2004,10 @@ impl Snow {
                     } else {
                         let inv_a = 255 - sa as u32;
                         let b = sprite.data[si] as u32 + (dst_data[di] as u32 * inv_a + 127) / 255;
-                        let g = sprite.data[si + 1] as u32 + (dst_data[di + 1] as u32 * inv_a + 127) / 255;
-                        let r = sprite.data[si + 2] as u32 + (dst_data[di + 2] as u32 * inv_a + 127) / 255;
+                        let g = sprite.data[si + 1] as u32
+                            + (dst_data[di + 1] as u32 * inv_a + 127) / 255;
+                        let r = sprite.data[si + 2] as u32
+                            + (dst_data[di + 2] as u32 * inv_a + 127) / 255;
                         let a = sa as u32 + (dst_data[di + 3] as u32 * inv_a + 127) / 255;
                         dst_data[di] = b as u8;
                         dst_data[di + 1] = g as u8;

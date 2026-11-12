@@ -1,8 +1,8 @@
 //! Persistent settings stored in %APPDATA%\Snowfall\settings.txt (simple key=value lines).
 
+use crate::tray::AppState;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use crate::tray::AppState;
 
 fn config_path() -> Option<PathBuf> {
     let base = std::env::var_os("APPDATA")?;
@@ -30,12 +30,20 @@ pub fn snapshot(state: &AppState) -> [usize; 9] {
 /// Loads saved settings into `state`. Missing file or bad values are ignored.
 pub fn load(state: &AppState) {
     let Some(path) = config_path() else { return };
-    let Ok(text) = std::fs::read_to_string(&path) else { return };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
     for line in text.lines() {
-        let Some((key, value)) = line.split_once('=') else { continue };
-        let Ok(v) = value.trim().parse::<usize>() else { continue };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let Ok(v) = value.trim().parse::<usize>() else {
+            continue;
+        };
         match key.trim() {
-            "flakes" => state.target_flakes.store(v.clamp(50, 3000), Ordering::Relaxed),
+            "flakes" => state
+                .target_flakes
+                .store(v.clamp(50, 3000), Ordering::Relaxed),
             "fps" => {
                 if matches!(v, 20 | 30 | 60) {
                     state.target_fps.store(v, Ordering::Relaxed);
