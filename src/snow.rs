@@ -16,7 +16,9 @@ const ACCUMULATION: f32 = 1.8;
 const EDGE_ZONE: f32 = 28.0;
 const PLOW_FRAC: f32 = 0.4;
 const CLEAR_FRONT_SPEED: f32 = 1000.0;
-const CLEAR_GUST_WIND: f32 = 650.0;
+const CLEAR_GUST_WIND: f32 = 1250.0;
+const CLEAR_SWIRL_SPEED: f32 = 500.0;
+const CLEAR_SWIRL_RATE: f32 = 5.0;
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
@@ -291,6 +293,7 @@ pub struct Snow {
     pub clear_hold: bool,
     pub clear_hold_time: f32,
     pub refill_from_top: bool,
+    pub clear_dir: f32,
 }
 
 impl Snow {
@@ -377,6 +380,7 @@ impl Snow {
             clear_hold: false,
             clear_hold_time: 0.0,
             refill_from_top: false,
+            clear_dir: 1.0,
         }
     }
 
@@ -436,16 +440,13 @@ impl Snow {
     }
 
     pub fn start_clear(&mut self) {
+        let dir: f32 = if rand::thread_rng().gen_bool(0.5) { 1.0 } else { -1.0 };
+        self.clear_dir = dir;
         self.clearing = true;
-        self.clear_front = 0.0;
+        self.clear_front = if dir > 0.0 { 0.0 } else { self.width };
         self.clear_gust = 1.0;
         self.clear_hold = true;
         self.clear_hold_time = 0.0;
-        for f in self.flakes.iter_mut() {
-            if !f.extra {
-                f.fade_target = 0.0;
-            }
-        }
     }
 
     pub fn seed_initial_piles(&mut self) {
@@ -1119,13 +1120,12 @@ impl Snow {
         let height_limit = self.height_limit;
         let strength = self.strength;
 
-        let mut global_wind = (self.wind_time * 0.6).sin() * 20.0 + (self.wind_time * 0.25).sin() * 35.0;
+        let global_wind = (self.wind_time * 0.6).sin() * 20.0 + (self.wind_time * 0.25).sin() * 35.0;
         if self.clearing || self.clear_hold {
             self.clear_gust = 1.0;
         } else if self.clear_gust > 0.0 {
             self.clear_gust = (self.clear_gust - dt / 0.8).max(0.0);
         }
-        global_wind += self.clear_gust * CLEAR_GUST_WIND;
 
         for (_, data) in self.owner_data.iter_mut() {
             data.visible_intervals.clear();
@@ -1279,7 +1279,8 @@ impl Snow {
         }
 
         if self.clearing {
-            self.clear_front += CLEAR_FRONT_SPEED * dt;
+            let dir = self.clear_dir;
+            self.clear_front += dir * CLEAR_FRONT_SPEED * dt;
             let front = self.clear_front;
             let extra_count = self.flakes.iter().filter(|f| f.extra).count();
             let mut new_flakes = Vec::new();
@@ -1291,7 +1292,8 @@ impl Snow {
                         continue;
                     }
                     let col_x = pile.x_start + i as f32 * 2.0 + 1.0;
-                    if col_x > front {
+                    let passed = if dir > 0.0 { col_x <= front } else { col_x >= front };
+                    if !passed {
                         continue;
                     }
                     pile.heights[i] = 0.0;
@@ -1304,7 +1306,7 @@ impl Snow {
                             new_flakes.push(Flake {
                                 x: col_x,
                                 y: rng.gen_range((pile.y - h)..pile.y),
-                                vx: rng.gen_range(450.0..900.0),
+                                vx: rng.gen_range(450.0..900.0) * dir,
                                 vy: rng.gen_range(-30.0..-5.0),
                                 bvx: 0.0,
                                 bvy: 0.0,
@@ -1327,7 +1329,7 @@ impl Snow {
                 }
             }
             self.flakes.extend(new_flakes);
-            if self.clear_front > self.width + 200.0 {
+            if (dir > 0.0 && self.clear_front > self.width + 200.0) || (dir < 0.0 && self.clear_front < -200.0) {
                 self.clearing = false;
                 self.clear_front = 0.0;
             }
@@ -1335,8 +1337,8 @@ impl Snow {
 
         if self.clear_hold && !self.clearing {
             self.clear_hold_time += dt;
-            let extra_left = self.flakes.iter().any(|f| f.extra);
-            if !extra_left || self.clear_hold_time > 8.0 {
+            let extra_left = !self.flakes.is_empty();
+            if !extra_left || self.clear_hold_time > 10.0 {
                 self.clear_hold = false;
                 self.refill_from_top = true;
             }
@@ -1345,6 +1347,9 @@ impl Snow {
 
         let clear_gust = self.clear_gust;
         let wind_time = self.wind_time;
+        let clearing_now = self.clearing;
+        let front_now = self.clear_front;
+        let dir_now = self.clear_dir;
 
         self.scratch_remove_indices.clear();
         let alive_count = self.flakes.iter().filter(|f| !f.extra && f.fade_target > 0.0).count();
@@ -1363,14 +1368,19 @@ impl Snow {
             flake.sway_phase += dt * 2.0;
             let sway = flake.sway_phase.sin() * (5.0 + flake.depth * 10.0);
             let effective_wind = global_wind * (0.5 + 0.5 * flake.depth);
+            // A flake is swept by the clearing gust once the wave front has passed it
+            let passed_front = if dir_now > 0.0 { flake.x <= front_now } else { flake.x >= front_now };
+            let swept = hold && (!clearing_now || passed_front);
+            if swept {
+                flake.bvx += CLEAR_GUST_WIND * 2.5 * dt * dir_now;
+            }
             let mut swirl_x = 0.0f32;
             let mut swirl_y = 0.0f32;
-            if clear_gust > 0.0 {
-                // each flake circles while being carried to the right; half of them rotate the other way
+            if swept && clear_gust > 0.0 {
                 let dir = if flake.depth < 0.7 { 1.0 } else { -1.0 };
-                let ang = flake.sway_phase * 3.0 * dir;
-                swirl_x = ang.cos() * 220.0 * clear_gust;
-                swirl_y = (ang.sin() * 260.0 + (flake.x * 0.01 - wind_time * 5.0).sin() * 120.0) * clear_gust;
+                let ang = flake.sway_phase * CLEAR_SWIRL_RATE * dir;
+                swirl_x = ang.cos() * CLEAR_SWIRL_SPEED * clear_gust;
+                swirl_y = (ang.sin() * CLEAR_SWIRL_SPEED + (flake.x * 0.008 - wind_time * 6.0 * dir_now).sin() * 300.0) * clear_gust;
             }
             flake.x += (flake.vx * strength + (effective_wind + sway) * strength + flake.bvx + swirl_x) * dt;
             flake.y += (flake.vy * strength + flake.bvy + swirl_y) * dt;
