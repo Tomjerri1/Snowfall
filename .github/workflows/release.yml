@@ -23,8 +23,9 @@ jobs:
         shell: pwsh
         run: |
           $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-          $base = $env:TAG.TrimStart('v').Split('-')[0]
-          if ($cargo -ne $base) {
+          $tagVer = $env:TAG.TrimStart('v')
+          $base = $tagVer.Split('-')[0]
+          if ($cargo -ne $tagVer -and $cargo -ne $base) {
             Write-Error "Tag $env:TAG does not match Cargo.toml version $cargo"
             exit 1
           }
