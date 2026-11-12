@@ -2019,3 +2019,70 @@ impl Snow {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bucket_idx() {
+        assert_eq!(Snow::get_bucket_idx(0.8), 0);
+        assert_eq!(Snow::get_bucket_idx(4.0), 7);
+        assert_eq!(Snow::get_bucket_idx(100.0), 7);
+        assert_eq!(Snow::get_bucket_idx(-5.0), 0);
+        for i in 0..=32 {
+            let v = 0.8 + i as f32 * 0.1;
+            assert!(Snow::get_bucket_idx(v) <= 7);
+        }
+    }
+
+    #[test]
+    fn test_floor_like() {
+        assert!(is_floor_like(None));
+        assert!(is_floor_like(Some(GROUND_ID)));
+        assert!(!is_floor_like(Some(42)));
+    }
+
+    #[test]
+    fn test_new() {
+        let snow_100 = Snow::new(800.0, 600.0, 100);
+        assert_eq!(snow_100.flakes.len(), 100);
+        for flake in &snow_100.flakes {
+            assert!(flake.x >= 0.0 && flake.x <= 800.0);
+            assert!(flake.y >= 0.0 && flake.y <= 600.0);
+        }
+
+        let snow_0 = Snow::new(800.0, 600.0, 0);
+        assert!(snow_0.flakes.is_empty());
+    }
+
+    #[test]
+    fn test_relax() {
+        let mut heights = vec![0.0, 10.0, 0.0];
+        let mut changed = false;
+        for _ in 0..20 {
+            if relax_range(&mut heights, 0, 2, 2.2) {
+                changed = true;
+            }
+        }
+        assert!(changed);
+        for i in 0..heights.len() - 1 {
+            let diff = (heights[i] - heights[i + 1]).abs();
+            assert!(diff <= 2.2 + 0.001);
+        }
+
+        let mut smooth = vec![1.0, 1.5, 2.0];
+        let orig = smooth.clone();
+        let res = relax_range(&mut smooth, 0, 2, 2.2);
+        assert!(!res);
+        assert_eq!(smooth, orig);
+    }
+
+    #[test]
+    fn test_smoothstep() {
+        assert_eq!(smoothstep(0.0, 1.0, -1.0), 0.0);
+        assert_eq!(smoothstep(0.0, 1.0, 2.0), 1.0);
+        let val = smoothstep(0.0, 1.0, 0.5);
+        assert!((val - 0.5).abs() <= 0.001);
+    }
+}
