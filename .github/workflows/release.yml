@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check tag matches Cargo.toml version
+        shell: pwsh
+        run: |
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $tagVer = $env:TAG.TrimStart('v')
+          $base = $tagVer.Split('-')[0]
+          if ($cargo -ne $tagVer -and $cargo -ne $base) {
+            Write-Error "Tag $env:TAG does not match Cargo.toml version $cargo"
+            exit 1
+          }
+      - run: cargo test --locked --all-targets
+      - run: cargo build --release --locked
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "snowfall-$env:TAG-windows-x64"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item target/release/snowfall.exe $name/
+          Copy-Item README.md, LICENSE $name/
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $name = "snowfall-$env:TAG-windows-x64"
+          $flags = @()
+          if ($env:TAG -match '-') { $flags += '--prerelease' }
+          gh release create $env:TAG "$name.zip" "$name.zip.sha256" --generate-notes --title "Snowfall $env:TAG" @flags

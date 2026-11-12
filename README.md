@@ -12,6 +12,12 @@ A lightweight **Windows desktop overlay** that makes snow fall over your screen.
 - **Mouse interaction:** move the cursor over a pile to plow the snow into a mound (it spills off the window edges), or over falling flakes to push them around. On the taskbar pile the cursor gradually erases snow in a circular area.
 - Tray icon with a small settings window, global hotkey to quit, low CPU.
 
+## Download
+
+Get the latest `snowfall-*-windows-x64.zip` from the [Releases](https://github.com/Tomjerri1/Snowfall/releases/latest) page, unzip it and run `snowfall.exe`. No installation needed.
+
+> Windows SmartScreen may show a warning because the executable is not code-signed. Click **More info → Run anyway**. You can verify the download with the `.sha256` file from the release.
+
 ## Usage
 
 | Action | How |
