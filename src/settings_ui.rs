@@ -49,8 +49,9 @@ const SWITCH_HEIGHT: i32 = 22;
 
 const FPS_TOP: i32 = 410;
 const BUTTON_TOP: i32 = 465;
+const UPDATE_TOP: i32 = 515;
 const CLIENT_WIDTH: i32 = 340;
-const CLIENT_HEIGHT: i32 = 520;
+const CLIENT_HEIGHT: i32 = 570;
 
 #[derive(Clone, Copy, PartialEq)]
 enum SliderKind {
@@ -335,6 +336,15 @@ fn clear_btn_rect() -> RECT {
         top: BUTTON_TOP,
         right: 320,
         bottom: BUTTON_TOP + 40,
+    }
+}
+
+fn update_btn_rect() -> RECT {
+    RECT {
+        left: 180,
+        top: UPDATE_TOP,
+        right: 320,
+        bottom: UPDATE_TOP + 34,
     }
 }
 
@@ -884,12 +894,98 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, state: &AppState
         DT_CENTER | DT_VCENTER | DT_SINGLELINE,
     );
 
+    // Update row
+    let hfont_small = CreateFontW(
+        12,
+        0,
+        0,
+        0,
+        FW_NORMAL.0 as i32,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET.0 as u32,
+        OUT_DEFAULT_PRECIS.0 as u32,
+        CLIP_DEFAULT_PRECIS.0 as u32,
+        DEFAULT_QUALITY.0 as u32,
+        DEFAULT_PITCH.0 as u32,
+        windows::core::w!("Segoe UI"),
+    );
+
+    let mut ver_rc = RECT {
+        left: MARGIN_X,
+        top: UPDATE_TOP,
+        right: 170,
+        bottom: UPDATE_TOP + 17,
+    };
+    let _ = SetTextColor(hdc, COLORREF(0x008A8482));
+    SelectObject(hdc, hfont_normal);
+    let ver_str = format!("Snowfall v{}", env!("CARGO_PKG_VERSION"));
+    draw_text_str(
+        hdc,
+        &ver_str,
+        &mut ver_rc,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+    );
+
+    let mut status_rc = RECT {
+        left: MARGIN_X,
+        top: UPDATE_TOP + 18,
+        right: 170,
+        bottom: UPDATE_TOP + 34,
+    };
+    let update_state_val = state.update_state.load(Ordering::Relaxed);
+    let status_str = match update_state_val {
+        1 => "Checking...".to_string(),
+        2 => "You have the latest version".to_string(),
+        3 => {
+            let tag = state
+                .update_tag
+                .lock()
+                .map(|l| l.clone())
+                .unwrap_or_default();
+            format!("Update available: {}", tag)
+        }
+        4 => "Check failed".to_string(),
+        _ => "".to_string(),
+    };
+    if !status_str.is_empty() {
+        SelectObject(hdc, hfont_small);
+        draw_text_str(
+            hdc,
+            &status_str,
+            &mut status_rc,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+        );
+    }
+
+    let update_r = update_btn_rect();
+    let u_brush = CreateSolidBrush(COLORREF(0x003A3D41));
+    let mut u_sys = update_r;
+    FillRect(hdc, &u_sys, u_brush);
+    let _ = DeleteObject(HGDIOBJ(u_brush.0));
+    let _ = SetTextColor(hdc, COLORREF(0x00FFFFFF));
+    let update_btn_str = if update_state_val == 3 {
+        "Download update"
+    } else {
+        "Check for updates"
+    };
+    SelectObject(hdc, hfont_normal);
+    draw_text_str(
+        hdc,
+        update_btn_str,
+        &mut u_sys,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
+
+    let _ = DeleteObject(HGDIOBJ(hfont_small.0));
+
     SelectObject(hdc, old_font);
     let _ = DeleteObject(HGDIOBJ(hfont_normal.0));
     let _ = DeleteObject(HGDIOBJ(hfont_bold.0));
 }
 
-fn handle_click(state: &AppState, x: i32, y: i32) -> bool {
+fn handle_click(state: &Arc<AppState>, x: i32, y: i32) -> bool {
     // Check accumulate tiles
     let t0_l = MARGIN_X;
     let t0_r = t0_l + TILE_WIDTH;
@@ -951,6 +1047,53 @@ fn handle_click(state: &AppState, x: i32, y: i32) -> bool {
     let cr = clear_btn_rect();
     if x >= cr.left && x <= cr.right && y >= cr.top && y <= cr.bottom {
         state.clear_requested.store(true, Ordering::Relaxed);
+        return true;
+    }
+
+    // Check update button
+    let ur = update_btn_rect();
+    if x >= ur.left && x <= ur.right && y >= ur.top && y <= ur.bottom {
+        let update_state = state.update_state.load(Ordering::Relaxed);
+        if update_state == 3 {
+            unsafe {
+                let _ = windows::Win32::UI::Shell::ShellExecuteW(
+                    HWND(std::ptr::null_mut()),
+                    windows::core::w!("open"),
+                    windows::core::w!("https://github.com/Tomjerri1/Snowfall/releases/latest"),
+                    windows::core::PCWSTR::null(),
+                    windows::core::PCWSTR::null(),
+                    windows::Win32::UI::WindowsAndMessaging::SW_SHOW,
+                );
+            }
+        } else if update_state != 1 {
+            state.update_state.store(1, Ordering::Release);
+            let state_clone = state.clone();
+            std::thread::spawn(move || {
+                match crate::update::fetch_latest_tag() {
+                    Ok(tag) => {
+                        let newer = crate::update::is_newer(env!("CARGO_PKG_VERSION"), &tag);
+                        if newer {
+                            if let Ok(mut lock) = state_clone.update_tag.lock() {
+                                *lock = tag;
+                            }
+                            state_clone.update_state.store(3, Ordering::Release);
+                        } else {
+                            state_clone.update_state.store(2, Ordering::Release);
+                        }
+                    }
+                    Err(_) => {
+                        state_clone.update_state.store(4, Ordering::Release);
+                    }
+                }
+                let hwnd_val = state_clone.settings_hwnd.load(Ordering::Acquire);
+                if hwnd_val != 0 {
+                    let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
+                    unsafe {
+                        let _ = InvalidateRect(hwnd, None, false);
+                    }
+                }
+            });
+        }
         return true;
     }
 

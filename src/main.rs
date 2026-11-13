@@ -9,6 +9,7 @@ mod settings_ui;
 mod snow;
 mod tracker;
 mod tray;
+mod update;
 
 use overlay::Overlay;
 use snow::{bgra, Snow};

@@ -53,7 +53,7 @@ Settings are saved automatically to `%APPDATA%\Snowfall\settings.txt` and restor
 
 ## Privacy
 
-Snowfall makes no network connections and collects no data. It only reads window positions and titles locally to find where snow can land.
+Snowfall collects no data and makes no network connections on its own. It only reads window positions and titles locally to find where snow can land. The one exception is the **Check for updates** button in the settings window: when you press it, Snowfall sends a single request to the GitHub API (api.github.com) to read the version number of the latest release. Nothing else is sent.
 
 ## License
 
