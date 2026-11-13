@@ -31,7 +31,7 @@ jobs:
           }
       - run: cargo test --locked --all-targets
       - run: cargo build --release --locked
-      - name: Package
+      - name: Package zip
         shell: pwsh
         run: |
           $name = "snowfall-$env:TAG-windows-x64"
@@ -41,12 +41,27 @@ jobs:
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $version = $env:TAG.TrimStart('v')
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          & $iscc "/DAppVersion=$version" "/O$PWD" "/Fsnowfall-$env:TAG-windows-x64-setup" installer\snowfall.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $setup = "snowfall-$env:TAG-windows-x64-setup.exe"
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          "$hash  $setup" | Out-File -Encoding ascii "$setup.sha256"
       - name: Publish release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $name = "snowfall-$env:TAG-windows-x64"
+          $zip = "snowfall-$env:TAG-windows-x64"
+          $setup = "snowfall-$env:TAG-windows-x64-setup.exe"
+          $lines = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name=$env:TAG --jq .body
+          $notes = ($lines | Where-Object { $_ -notmatch 'Full Changelog' }) -join "`n"
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
           $flags = @()
           if ($env:TAG -match '-') { $flags += '--prerelease' }
-          gh release create $env:TAG "$name.zip" "$name.zip.sha256" --generate-notes --title "Snowfall $env:TAG" @flags
+          gh release create $env:TAG "$zip.zip" "$zip.zip.sha256" $setup "$setup.sha256" --notes-file notes.md --title "Snowfall $env:TAG" @flags

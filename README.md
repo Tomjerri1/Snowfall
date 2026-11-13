@@ -14,9 +14,12 @@ A lightweight **Windows desktop overlay** that makes snow fall over your screen.
 
 ## Download
 
-Get the latest `snowfall-*-windows-x64.zip` from the [Releases](https://github.com/Tomjerri1/Snowfall/releases/latest) page, unzip it and run `snowfall.exe`. No installation needed.
+Get the latest version from the [Releases](https://github.com/Tomjerri1/Snowfall/releases/latest) page:
 
-> Windows SmartScreen may show a warning because the executable is not code-signed. Click **More info → Run anyway**. You can verify the download with the `.sha256` file from the release.
+- **`snowfall-*-setup.exe`** (recommended): the installer. No administrator rights needed. It can add a desktop shortcut and start Snowfall with Windows.
+- **`snowfall-*-windows-x64.zip`**: portable version. Unzip it and run `snowfall.exe`.
+
+> Windows SmartScreen may show a warning because the files are not code-signed. Click **More info → Run anyway**. You can verify a download with the matching `.sha256` file from the release.
 
 ## Usage
 
