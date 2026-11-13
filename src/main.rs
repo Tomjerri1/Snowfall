@@ -1,5 +1,7 @@
 //! Main entry point for snowfall application.
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod config;
 mod overlay;
 mod platform;
