@@ -38,6 +38,7 @@ Name: "{autodesktop}\Snowfall"; Filename: "{app}\snowfall.exe"; Tasks: desktopic
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Snowfall"; ValueData: """{app}\snowfall.exe"""; Flags: uninsdeletevalue; Tasks: autostart
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Snowfall"; ValueType: none; Flags: deletevalue; Tasks: not autostart
 
 [Run]
 Filename: "{app}\snowfall.exe"; Description: "Launch Snowfall"; Flags: nowait postinstall skipifsilent
