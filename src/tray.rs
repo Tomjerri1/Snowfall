@@ -40,6 +40,8 @@ pub struct AppState {
     pub acc_dock: AtomicBool,
     pub acc_ground: AtomicBool,
     pub mouse_flakes: AtomicBool,
+    pub update_state: AtomicUsize,
+    pub update_tag: std::sync::Mutex<String>,
 }
 
 impl AppState {
@@ -59,6 +61,8 @@ impl AppState {
             acc_dock: AtomicBool::new(true),
             acc_ground: AtomicBool::new(false),
             mouse_flakes: AtomicBool::new(true),
+            update_state: AtomicUsize::new(0),
+            update_tag: std::sync::Mutex::new(String::new()),
         }
     }
 }
