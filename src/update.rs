@@ -2,7 +2,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Networking::WinHttp::{
     WinHttpAddRequestHeaders, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
     WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
-    WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_ADDREQ_FLAG_ADD,
+    WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_ADDREQ_FLAG_ADD,
     WINHTTP_ADDREQ_FLAG_REPLACE, WINHTTP_FLAG_SECURE, WINHTTP_QUERY_FLAG_NUMBER,
     WINHTTP_QUERY_STATUS_CODE,
 };
@@ -14,6 +14,7 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64, bool)> {
     } else {
         s
     };
+    let s = s.split('+').next().unwrap_or(s);
 
     let (version_part, is_prerelease) = if let Some(idx) = s.find('-') {
         let v = &s[..idx];
@@ -26,7 +27,7 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64, bool)> {
         (s, false)
     };
 
-    if version_part.contains('+') || version_part.contains(' ') {
+    if version_part.contains(' ') {
         return None;
     }
 
@@ -122,7 +123,7 @@ pub fn fetch_latest_tag() -> Result<String, String> {
 unsafe fn fetch_latest_tag_impl() -> Result<String, String> {
     let h_session = WinHttpOpen(
         windows::core::w!("Snowfall-update-check"),
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
         PCWSTR::null(),
         PCWSTR::null(),
         0,
@@ -258,5 +259,13 @@ mod tests {
 
         let json2 = "{}";
         assert!(extract_tag_name(json2).is_none());
+    }
+
+    #[test]
+    fn test_build_metadata_and_bad_tags() {
+        assert!(parse_version("v0.1.2+build.1") == Some((0, 1, 2, false)));
+        assert!(parse_version("0.1.2-pr.1+build-5") == Some((0, 1, 2, true)));
+        assert!(parse_version("release-0.1.2").is_none());
+        assert!(is_newer("0.1.1", "v0.1.2+build.1"));
     }
 }

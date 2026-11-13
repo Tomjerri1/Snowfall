@@ -1071,14 +1071,18 @@ fn handle_click(state: &Arc<AppState>, x: i32, y: i32) -> bool {
             std::thread::spawn(move || {
                 match crate::update::fetch_latest_tag() {
                     Ok(tag) => {
-                        let newer = crate::update::is_newer(env!("CARGO_PKG_VERSION"), &tag);
-                        if newer {
-                            if let Ok(mut lock) = state_clone.update_tag.lock() {
-                                *lock = tag;
-                            }
-                            state_clone.update_state.store(3, Ordering::Release);
+                        if crate::update::parse_version(&tag).is_none() {
+                            state_clone.update_state.store(4, Ordering::Release);
                         } else {
-                            state_clone.update_state.store(2, Ordering::Release);
+                            let newer = crate::update::is_newer(env!("CARGO_PKG_VERSION"), &tag);
+                            if newer {
+                                if let Ok(mut lock) = state_clone.update_tag.lock() {
+                                    *lock = tag;
+                                }
+                                state_clone.update_state.store(3, Ordering::Release);
+                            } else {
+                                state_clone.update_state.store(2, Ordering::Release);
+                            }
                         }
                     }
                     Err(_) => {
