@@ -786,6 +786,7 @@ version = "0.1.2"
 dependencies = [
  "ksni",
  "rand",
+ "rustix",
  "tiny-skia",
  "windows",
  "winresource",

@@ -9,6 +9,7 @@
 mod conn;
 mod monitors;
 mod overlay;
+mod shm;
 mod tracker;
 mod tray;
 
@@ -86,6 +87,16 @@ fn grab_ctrl_alt(c: &Conn, keycode: Keycode) {
     let _ = c.conn.flush();
 }
 
+impl X11Backend {
+    fn handle_event(&mut self, event: Event) {
+        match event {
+            Event::KeyPress(ev) if Some(ev.detail) == self.quit_keycode => self.quit = true,
+            Event::ShmCompletion(_) => self.overlay.shm_completed(),
+            event => self.tracker.on_event(&event),
+        }
+    }
+}
+
 impl Backend for X11Backend {
     fn start(state: Arc<AppState>) -> Self {
         let c = Conn::connect().unwrap_or_else(|e| fatal(e));
@@ -128,6 +139,13 @@ impl Backend for X11Backend {
     }
 
     fn pixmap_mut(&mut self) -> tiny_skia::PixmapMut<'_> {
+        // The server may still be reading the shared buffer; it announces that it is done with an event.
+        while self.overlay.shm_pending() {
+            match self.c.conn.wait_for_event() {
+                Ok(event) => self.handle_event(event),
+                Err(_) => self.overlay.shm_completed(), // connection lost: nothing left to wait for
+            }
+        }
         self.overlay.pixmap_mut()
     }
 
@@ -138,12 +156,7 @@ impl Backend for X11Backend {
     fn pump_events(&mut self) -> bool {
         loop {
             match self.c.conn.poll_for_event() {
-                Ok(Some(Event::KeyPress(ev))) => {
-                    if Some(ev.detail) == self.quit_keycode {
-                        self.quit = true;
-                    }
-                }
-                Ok(Some(event)) => self.tracker.on_event(&event),
+                Ok(Some(event)) => self.handle_event(event),
                 Ok(None) => break,
                 // The connection to the X server is gone.
                 Err(_) => return false,

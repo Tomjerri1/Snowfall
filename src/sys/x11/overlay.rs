@@ -5,9 +5,11 @@
 //! which lets all mouse events pass through to the windows below.
 
 use super::conn::Conn;
+use super::shm::ShmBuffer;
 use std::sync::Arc;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::shape::{self, ConnectionExt as _};
+use x11rb::protocol::shm::ConnectionExt as _;
 use x11rb::protocol::xproto::{
     ClipOrdering, ColormapAlloc, ConfigureWindowAux, ConnectionExt as _, CreateGCAux,
     CreateWindowAux, EventMask, Gcontext, ImageFormat, ImageOrder, PropMode, StackMode,
@@ -21,9 +23,27 @@ pub struct Overlay {
     gc: Gcontext,
     width: u16,
     height: u16,
-    /// Premultiplied BGRA, top-down, `width * height * 4` bytes.
-    buf: Vec<u8>,
+    pixels: Pixels,
+    /// A `ShmPutImage` was sent and its completion event has not arrived, so the server may still read `pixels`.
+    shm_pending: bool,
     visible: bool,
+}
+
+/// Premultiplied BGRA, top-down, `width * height * 4` bytes.
+enum Pixels {
+    /// Uploaded with `PutImage`.
+    Heap(Vec<u8>),
+    /// Shared with the X server, uploaded with `ShmPutImage`.
+    Shared(ShmBuffer),
+}
+
+impl Pixels {
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        match self {
+            Pixels::Heap(buf) => buf,
+            Pixels::Shared(shm) => shm.as_mut_slice(),
+        }
+    }
 }
 
 /// Finds a 32-bit TrueColor visual with the usual ARGB layout.
@@ -119,13 +139,25 @@ impl Overlay {
             .map_err(map_err)?;
         c.conn.flush().map_err(map_err)?;
 
+        let len = width as usize * height as usize * 4;
+        let pixels = match ShmBuffer::create(&c, len) {
+            Ok(shm) => Pixels::Shared(shm),
+            Err(reason) => {
+                eprintln!(
+                    "snowfall: MIT-SHM unavailable ({reason}), uploading frames with PutImage"
+                );
+                Pixels::Heap(vec![0; len])
+            }
+        };
+
         Ok(Self {
             c,
             window,
             gc,
             width,
             height,
-            buf: vec![0; width as usize * height as usize * 4],
+            pixels,
+            shm_pending: false,
             visible: true,
         })
     }
@@ -140,8 +172,12 @@ impl Overlay {
     }
 
     pub fn pixmap_mut(&mut self) -> tiny_skia::PixmapMut<'_> {
-        tiny_skia::PixmapMut::from_bytes(&mut self.buf, self.width as u32, self.height as u32)
-            .expect("overlay buffer matches its size")
+        tiny_skia::PixmapMut::from_bytes(
+            self.pixels.as_mut_slice(),
+            self.width as u32,
+            self.height as u32,
+        )
+        .expect("overlay buffer matches its size")
     }
 
     pub fn set_visible(&mut self, visible: bool) {
@@ -171,28 +207,69 @@ impl Overlay {
         );
     }
 
-    /// Uploads the pixel buffer to the window, in horizontal bands that fit into one X request.
+    /// True while the X server may still be reading the shared buffer; drawing must wait until
+    /// [`Overlay::shm_completed`] is called for the `ShmCompletion` event.
+    pub fn shm_pending(&self) -> bool {
+        self.shm_pending
+    }
+
+    pub fn shm_completed(&mut self) {
+        self.shm_pending = false;
+    }
+
+    /// Shows the pixel buffer in the window.
     pub fn present(&mut self) {
         if !self.visible {
             return;
         }
-        let row_bytes = self.width as usize * 4;
-        // A PutImage request has a 24-byte header; leave some more slack.
-        let max_bytes = self.c.conn.maximum_request_bytes().saturating_sub(64);
-        let rows_per_band = (max_bytes / row_bytes).clamp(1, self.height as usize);
-
-        let mut y = 0usize;
-        while y < self.height as usize {
-            let rows = rows_per_band.min(self.height as usize - y);
-            let data = &self.buf[y * row_bytes..(y + rows) * row_bytes];
-            if self
-                .c
-                .conn
-                .put_image(
-                    ImageFormat::Z_PIXMAP,
+        match &mut self.pixels {
+            Pixels::Shared(shm) => {
+                let seg = shm.seg();
+                let sent = self.c.conn.shm_put_image(
                     self.window,
                     self.gc,
                     self.width,
+                    self.height,
+                    0,
+                    0,
+                    self.width,
+                    self.height,
+                    0,
+                    0,
+                    32,
+                    ImageFormat::Z_PIXMAP.into(),
+                    true,
+                    seg,
+                    0,
+                );
+                self.shm_pending = sent.is_ok();
+                let _ = self.c.conn.flush();
+            }
+            Pixels::Heap(buf) => {
+                put_image_in_bands(&self.c, self.window, self.gc, self.width, self.height, buf)
+            }
+        }
+    }
+}
+
+/// Uploads `buf` with `PutImage`, in horizontal bands that fit into one X request.
+fn put_image_in_bands(c: &Conn, window: Window, gc: Gcontext, width: u16, height: u16, buf: &[u8]) {
+    {
+        let row_bytes = width as usize * 4;
+        // A PutImage request has a 24-byte header; leave some more slack.
+        let max_bytes = c.conn.maximum_request_bytes().saturating_sub(64);
+        let rows_per_band = (max_bytes / row_bytes).clamp(1, height as usize);
+
+        let mut y = 0usize;
+        while y < height as usize {
+            let rows = rows_per_band.min(height as usize - y);
+            let data = &buf[y * row_bytes..(y + rows) * row_bytes];
+            if c.conn
+                .put_image(
+                    ImageFormat::Z_PIXMAP,
+                    window,
+                    gc,
+                    width,
                     rows as u16,
                     0,
                     y as i16,
@@ -206,7 +283,7 @@ impl Overlay {
             }
             y += rows;
         }
-        let _ = self.c.conn.flush();
+        let _ = c.conn.flush();
     }
 }
 
