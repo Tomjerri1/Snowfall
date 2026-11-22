@@ -12,6 +12,11 @@ mod windows;
 #[cfg(windows)]
 pub use self::windows::{http_get, WindowsBackend as PlatformBackend};
 
+#[cfg(unix)]
+mod curl_http;
+#[cfg(unix)]
+pub use curl_http::http_get;
+
 #[cfg(not(windows))]
 compile_error!("Snowfall has no platform backend for this OS yet");
 
