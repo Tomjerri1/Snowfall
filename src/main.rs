@@ -2,95 +2,67 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app;
 mod config;
-mod overlay;
-mod platform;
-mod settings_ui;
+mod geometry;
 mod snow;
-mod tracker;
-mod tray;
+mod sys;
+// The update check is driven by the settings window, which only the Windows backend has so far.
+#[cfg_attr(not(windows), allow(dead_code))]
 mod update;
 
-use overlay::Overlay;
+use geometry::{Accumulate, Monitor, Segment, WindowInfo};
 use snow::{bgra, Snow};
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
-use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
-use windows::Win32::System::Threading::{
-    GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_NORMAL,
-};
-use windows::Win32::UI::HiDpi::{
-    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
-};
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetSystemMetrics, ShowWindow, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_HIDE, SW_SHOWNOACTIVATE,
-};
+use sys::{Backend, PlatformBackend, ScreenBounds};
 
 const LATENCY_COMP: f32 = 0.025;
 
+/// Builds the landing segments and shifts them into overlay-local coordinates.
+fn build_local_segments(
+    windows: &[WindowInfo],
+    monitors: &[Monitor],
+    bounds: ScreenBounds,
+    acc: Accumulate,
+) -> Vec<Segment> {
+    let (origin_x, origin_y, _, _) = bounds;
+    geometry::build_segments(windows, monitors, origin_y, acc)
+        .into_iter()
+        .map(|seg| Segment {
+            owner: seg.owner,
+            x1: seg.x1 - origin_x as f32,
+            x2: seg.x2 - origin_x as f32,
+            y: seg.y - origin_y as f32,
+            full_left: seg.full_left - origin_x as f32,
+            full_right: seg.full_right - origin_x as f32,
+        })
+        .collect()
+}
+
 fn main() {
-    unsafe {
-        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        let _ = timeBeginPeriod(1);
-    }
-
-    struct TimePeriodGuard;
-    impl Drop for TimePeriodGuard {
-        fn drop(&mut self) {
-            unsafe {
-                let _ = timeEndPeriod(1);
-            }
-        }
-    }
-    let _time_guard = TimePeriodGuard;
-
-    tracker::init();
-
     let debug_mode = std::env::args().any(|arg| arg == "--debug");
     let dump_mode = std::env::args().any(|arg| arg == "--dump");
     let brushlog_mode = std::env::args().any(|arg| arg == "--brushlog");
 
-    let state = std::sync::Arc::new(tray::AppState::new());
+    let state = std::sync::Arc::new(app::AppState::new());
     config::load(&state);
-    let tray_handle = tray::spawn_tray_thread(state.clone());
-    let mut overlay = Overlay::new(state.clone());
+    let mut backend = PlatformBackend::start(state.clone());
 
     if dump_mode {
         std::thread::sleep(Duration::from_secs(5));
-        let own_hwnd = tracker::get_overlay_hwnd();
-        let dump_str = tracker::dump_all(own_hwnd);
+        let dump_str = backend.dump_windows();
         print!("{}", dump_str);
         if let Err(e) = std::fs::write("dump.txt", &dump_str) {
             eprintln!("Failed to write dump.txt: {}", e);
         }
-        state.quit.store(true, Ordering::Relaxed);
-        let tray_hwnd = HWND(state.tray_hwnd.load(Ordering::Acquire) as *mut std::ffi::c_void);
-        if !tray_hwnd.is_invalid() {
-            let _ = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                    tray_hwnd,
-                    windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                    WPARAM(0),
-                    LPARAM(0),
-                )
-            };
-        }
-        let _ = tray_handle.join();
         return;
     }
 
-    let (width, height) = unsafe {
-        (
-            GetSystemMetrics(SM_CXVIRTUALSCREEN),
-            GetSystemMetrics(SM_CYVIRTUALSCREEN),
-        )
-    };
-
-    let origin_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
-    let origin_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let bounds = backend.bounds();
+    let (origin_x, origin_y) = (bounds.0, bounds.1);
+    let (width, height) = (bounds.2 - bounds.0, bounds.3 - bounds.1);
 
     let w = if width > 0 { width as f32 } else { 1920.0 };
     let h = if height > 0 { height as f32 } else { 1080.0 };
@@ -103,31 +75,23 @@ fn main() {
     let mut last_snapshot_time = Instant::now() - safety_interval;
     let mut last_window_change_time = Instant::now() - Duration::from_secs(10);
 
-    let mut cached_windows = tracker::snapshot(windows::Win32::Foundation::HWND::default());
-    let floor = platform::floor_y();
-    let virt = (origin_x, origin_y, origin_x + width, origin_y + height);
+    let mut cached_windows = backend.snapshot();
     let acc_windows = state.acc_windows.load(Ordering::Relaxed);
     let acc_dock = state.acc_dock.load(Ordering::Relaxed);
     let acc_ground = state.acc_ground.load(Ordering::Relaxed);
     let mut prev_acc_windows = acc_windows;
     let mut prev_acc_dock = acc_dock;
     let mut prev_acc_ground = acc_ground;
-    let raw_segments = platform::build_segments(
+    let mut cached_segments = build_local_segments(
         &cached_windows,
-        virt,
-        (floor, acc_windows, acc_dock, acc_ground),
+        &backend.monitors(),
+        bounds,
+        Accumulate {
+            windows: acc_windows,
+            dock: acc_dock,
+            ground: acc_ground,
+        },
     );
-    let mut cached_segments: Vec<platform::Segment> = raw_segments
-        .into_iter()
-        .map(|seg| platform::Segment {
-            owner: seg.owner,
-            x1: seg.x1 - origin_x as f32,
-            x2: seg.x2 - origin_x as f32,
-            y: seg.y - origin_y as f32,
-            full_left: seg.full_left - origin_x as f32,
-            full_right: seg.full_right - origin_x as f32,
-        })
-        .collect();
 
     snow.update(0.0, &cached_segments);
     snow.seed_initial_piles();
@@ -136,8 +100,6 @@ fn main() {
     if brushlog_mode {
         snow.enable_brushlog(true);
     }
-
-    let overlay_hwnd = tracker::get_overlay_hwnd();
 
     let perf_mode = std::env::args().any(|arg| arg == "--perf");
     let mut perf_frame_count = 0;
@@ -166,18 +128,6 @@ fn main() {
     let mut saved_comp: (f32, f32) = (0.0, 0.0);
     let mut last_moving_hwnd: isize = 0;
 
-    let mut thread_priority_above_normal = false;
-    struct ThreadPriorityGuard(bool);
-    impl Drop for ThreadPriorityGuard {
-        fn drop(&mut self) {
-            if self.0 {
-                unsafe {
-                    let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
-                }
-            }
-        }
-    }
-    let mut priority_guard = ThreadPriorityGuard(false);
     let mut win_rects: Vec<(isize, tiny_skia::Rect)> = Vec::new();
 
     let mut last_saved_snapshot = config::snapshot(&state);
@@ -201,7 +151,7 @@ fn main() {
             break;
         }
 
-        if !overlay.pump_messages() {
+        if !backend.pump_events() {
             state.quit.store(true, Ordering::Relaxed);
             break;
         }
@@ -210,55 +160,27 @@ fn main() {
             snow.start_clear();
         }
 
-        let moving_hwnd = tracker::get_moving_hwnd();
+        let moving_hwnd = backend.moving_window().unwrap_or(0);
         let is_dragging = moving_hwnd != 0;
+        backend.set_high_priority(is_dragging);
 
-        if is_dragging {
-            if !thread_priority_above_normal {
-                unsafe {
-                    let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
-                }
-                thread_priority_above_normal = true;
-                priority_guard.0 = true;
-            }
-        } else {
-            if thread_priority_above_normal {
-                unsafe {
-                    let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
-                }
-                thread_priority_above_normal = false;
-                priority_guard.0 = false;
-            }
+        if !is_dragging && backend.fullscreen_active() {
+            backend.set_overlay_visible(false);
+            std::thread::sleep(Duration::from_millis(150));
+            last_time = Instant::now();
+            prev_cursor_pos = None;
+            continue;
         }
-
-        if !is_dragging {
-            if tracker::fullscreen_active() {
-                unsafe {
-                    let _ = ShowWindow(overlay_hwnd, SW_HIDE);
-                }
-                std::thread::sleep(Duration::from_millis(150));
-                last_time = Instant::now();
-                prev_cursor_pos = None;
-                continue;
-            } else {
-                unsafe {
-                    let _ = ShowWindow(overlay_hwnd, SW_SHOWNOACTIVATE);
-                }
-            }
-        } else {
-            unsafe {
-                let _ = ShowWindow(overlay_hwnd, SW_SHOWNOACTIVATE);
-            }
-        }
+        backend.set_overlay_visible(true);
 
         if state.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(150));
             last_time = Instant::now();
             prev_cursor_pos = None;
-            let mut pixmap = overlay.pixmap_mut();
+            let mut pixmap = backend.pixmap_mut();
             pixmap.data_mut().fill(0);
             snow.draw(&mut pixmap, &win_rects);
-            overlay.present();
+            backend.present();
             continue;
         }
 
@@ -266,7 +188,7 @@ fn main() {
             last_moving_hwnd = moving_hwnd;
         }
 
-        for hwnd in tracker::take_minimized() {
+        for hwnd in backend.take_minimized() {
             snow.release_owner(hwnd);
             cached_windows.retain(|w| w.hwnd != hwnd);
         }
@@ -276,12 +198,9 @@ fn main() {
         let dt = elapsed.as_secs_f32();
         last_time = now;
 
-        let mut pt = POINT::default();
-        unsafe {
-            let _ = GetCursorPos(&mut pt);
-        }
-        let cx = pt.x as f32 - origin_x as f32;
-        let cy = pt.y as f32 - origin_y as f32;
+        let (pt_x, pt_y) = backend.cursor_pos();
+        let cx = pt_x as f32 - origin_x as f32;
+        let cy = pt_y as f32 - origin_y as f32;
 
         let mut cvx = 0.0;
         let mut cvy = 0.0;
@@ -317,7 +236,7 @@ fn main() {
         };
 
         if is_dragging {
-            if let Some(new_rect) = tracker::read_rect(moving_hwnd) {
+            if let Some(new_rect) = backend.read_rect(moving_hwnd) {
                 let cur_x = new_rect.left as f32;
                 let cur_y = new_rect.top as f32;
                 let sample_now = Instant::now();
@@ -372,7 +291,7 @@ fn main() {
                 if let Some(win) = cached_windows.iter_mut().find(|w| w.hwnd == moving_hwnd) {
                     win.rect = new_rect;
                 } else {
-                    cached_windows.push(platform::WindowInfo {
+                    cached_windows.push(WindowInfo {
                         hwnd: moving_hwnd,
                         rect: new_rect,
                     });
@@ -387,7 +306,7 @@ fn main() {
 
             if last_all_refresh.elapsed() >= Duration::from_millis(100) {
                 last_all_refresh = Instant::now();
-                tracker::refresh_rects(&mut cached_windows);
+                backend.refresh_rects(&mut cached_windows);
             }
         } else {
             drag_samples.clear();
@@ -406,18 +325,18 @@ fn main() {
                 smoothed_vel = (0.0, 0.0);
             }
 
-            let dirty = tracker::is_dirty();
+            let dirty = backend.is_dirty();
             let time_since_last_snapshot = last_snapshot_time.elapsed();
             let safety_refresh = time_since_last_snapshot >= safety_interval;
 
             if dirty || safety_refresh {
-                tracker::reset_dirty();
+                backend.reset_dirty();
                 last_snapshot_time = Instant::now();
-                cached_windows = tracker::snapshot(windows::Win32::Foundation::HWND::default());
+                cached_windows = backend.snapshot();
                 segments_rebuilt = true;
                 last_window_change_time = Instant::now();
             } else {
-                let rects_changed = tracker::refresh_rects(&mut cached_windows);
+                let rects_changed = backend.refresh_rects(&mut cached_windows);
                 if rects_changed {
                     last_window_change_time = Instant::now();
                     segments_rebuilt = true;
@@ -453,8 +372,6 @@ fn main() {
         };
 
         if segments_rebuilt || flags_changed || is_dragging || ease_start_time.is_some() {
-            let floor = platform::floor_y();
-            let virt = (origin_x, origin_y, origin_x + width, origin_y + height);
             let segments_windows = if is_dragging || ease_start_time.is_some() {
                 let mut temp_wins = cached_windows.clone();
                 let target_hwnd = if is_dragging {
@@ -475,22 +392,16 @@ fn main() {
                 cached_windows.clone()
             };
 
-            let raw_segments = platform::build_segments(
+            cached_segments = build_local_segments(
                 &segments_windows,
-                virt,
-                (floor, acc_windows, acc_dock, acc_ground),
+                &backend.monitors(),
+                bounds,
+                Accumulate {
+                    windows: acc_windows,
+                    dock: acc_dock,
+                    ground: acc_ground,
+                },
             );
-            cached_segments = raw_segments
-                .into_iter()
-                .map(|seg| platform::Segment {
-                    owner: seg.owner,
-                    x1: seg.x1 - origin_x as f32,
-                    x2: seg.x2 - origin_x as f32,
-                    y: seg.y - origin_y as f32,
-                    full_left: seg.full_left - origin_x as f32,
-                    full_right: seg.full_right - origin_x as f32,
-                })
-                .collect();
         }
 
         win_rects.clear();
@@ -559,7 +470,7 @@ fn main() {
             brushlog_last_print = Instant::now();
         }
 
-        let mut pixmap = overlay.pixmap_mut();
+        let mut pixmap = backend.pixmap_mut();
         pixmap.data_mut().fill(0);
 
         let update_timer = if perf_mode {
@@ -638,7 +549,7 @@ fn main() {
         } else {
             None
         };
-        overlay.present();
+        backend.present();
         let present_duration = present_timer.map_or(0.0, |t| t.elapsed().as_secs_f32());
 
         let frame_duration = frame_start.elapsed().as_secs_f32();
@@ -684,7 +595,7 @@ fn main() {
         }
 
         if is_dragging {
-            let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
+            backend.wait_vsync();
             let frame_time = now.elapsed();
             let min_frame_duration = Duration::from_secs_f64(1.0 / 144.0);
             if frame_time < min_frame_duration {
@@ -699,8 +610,7 @@ fn main() {
             let frame_time = now.elapsed();
 
             if boost {
-                let flush_res = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
-                if flush_res.is_err() {
+                if !backend.wait_vsync() {
                     if frame_time < target_frame_duration {
                         std::thread::sleep(target_frame_duration - frame_time);
                     }
@@ -717,34 +627,5 @@ fn main() {
 
     config::save(&state);
     state.quit.store(true, Ordering::Relaxed);
-    let tray_hwnd = HWND(state.tray_hwnd.load(Ordering::Acquire) as *mut std::ffi::c_void);
-    if !tray_hwnd.is_invalid() {
-        let _ = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                tray_hwnd,
-                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                WPARAM(0),
-                LPARAM(0),
-            )
-        };
-    } else {
-        let hwnd = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::FindWindowW(
-                windows::core::w!("SnowfallTray"),
-                None,
-            )
-            .unwrap_or_default()
-        };
-        if !hwnd.is_invalid() {
-            let _ = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                    hwnd,
-                    windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                    WPARAM(0),
-                    LPARAM(0),
-                )
-            };
-        }
-    }
-    let _ = tray_handle.join();
+    // Dropping `backend` tears down the overlay and the tray UI.
 }

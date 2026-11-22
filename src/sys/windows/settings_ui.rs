@@ -1,7 +1,7 @@
 //! Settings UI module for snowfall configuration window.
 
-use crate::tray::AppState;
-use std::sync::atomic::Ordering;
+use crate::app::AppState;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
@@ -26,6 +26,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 // Layout constants
+/// HWND of the settings window, 0 until it is created.
+static SETTINGS_HWND: AtomicUsize = AtomicUsize::new(0);
+
 const MARGIN_X: i32 = 20;
 const TRACK_WIDTH: i32 = 300;
 const SLIDER1_TOP: i32 = 15;
@@ -86,11 +89,11 @@ fn place_window(hwnd: HWND) {
 
 /// Toggle the settings window visibility or create it if not yet created.
 pub fn toggle(state: &Arc<AppState>) {
-    let hwnd_val = state.settings_hwnd.load(Ordering::Acquire);
+    let hwnd_val = SETTINGS_HWND.load(Ordering::Acquire);
     if hwnd_val == 0 {
         create_hidden(state);
     }
-    let hwnd_val = state.settings_hwnd.load(Ordering::Acquire);
+    let hwnd_val = SETTINGS_HWND.load(Ordering::Acquire);
     if hwnd_val != 0 {
         let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
         unsafe {
@@ -107,7 +110,7 @@ pub fn toggle(state: &Arc<AppState>) {
 
 #[allow(clippy::manual_dangling_ptr)]
 pub fn create_hidden(state: &Arc<AppState>) {
-    let hwnd_val = state.settings_hwnd.load(Ordering::Acquire);
+    let hwnd_val = SETTINGS_HWND.load(Ordering::Acquire);
     if hwnd_val != 0 {
         return;
     }
@@ -164,9 +167,7 @@ pub fn create_hidden(state: &Arc<AppState>) {
         )
         .expect("Failed to create settings window");
 
-        state
-            .settings_hwnd
-            .store(hwnd.0 as usize, Ordering::Release);
+        SETTINGS_HWND.store(hwnd.0 as usize, Ordering::Release);
 
         let settings_data = Box::new(SettingsData {
             state: state.clone(),
@@ -1065,31 +1066,9 @@ fn handle_click(state: &Arc<AppState>, x: i32, y: i32) -> bool {
                     windows::Win32::UI::WindowsAndMessaging::SW_SHOW,
                 );
             }
-        } else if update_state != 1 {
-            state.update_state.store(1, Ordering::Release);
-            let state_clone = state.clone();
-            std::thread::spawn(move || {
-                match crate::update::fetch_latest_tag() {
-                    Ok(tag) => {
-                        if crate::update::parse_version(&tag).is_none() {
-                            state_clone.update_state.store(4, Ordering::Release);
-                        } else {
-                            let newer = crate::update::is_newer(env!("CARGO_PKG_VERSION"), &tag);
-                            if newer {
-                                if let Ok(mut lock) = state_clone.update_tag.lock() {
-                                    *lock = tag;
-                                }
-                                state_clone.update_state.store(3, Ordering::Release);
-                            } else {
-                                state_clone.update_state.store(2, Ordering::Release);
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        state_clone.update_state.store(4, Ordering::Release);
-                    }
-                }
-                let hwnd_val = state_clone.settings_hwnd.load(Ordering::Acquire);
+        } else if update_state != crate::update::STATE_CHECKING {
+            crate::update::start_check(state, || {
+                let hwnd_val = SETTINGS_HWND.load(Ordering::Acquire);
                 if hwnd_val != 0 {
                     let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
                     unsafe {

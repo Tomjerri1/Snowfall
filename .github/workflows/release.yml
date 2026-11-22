@@ -6,19 +6,18 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.ref_name }}
 
 jobs:
-  release:
-    runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      CARGO_TERM_COLOR: always
-      TAG: ${{ github.ref_name }}
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - name: Check tag matches Cargo.toml version
         shell: pwsh
         run: |
@@ -29,6 +28,15 @@ jobs:
             Write-Error "Tag $env:TAG does not match Cargo.toml version $cargo"
             exit 1
           }
+
+  windows:
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked --all-targets
       - run: cargo build --release --locked
       - name: Package zip
@@ -52,16 +60,98 @@ jobs:
           $setup = "snowfall-$env:TAG-windows-x64-setup.exe"
           $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
           "$hash  $setup" | Out-File -Encoding ascii "$setup.sha256"
-      - name: Publish release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            snowfall-${{ github.ref_name }}-windows-x64.zip
+            snowfall-${{ github.ref_name }}-windows-x64.zip.sha256
+            snowfall-${{ github.ref_name }}-windows-x64-setup.exe
+            snowfall-${{ github.ref_name }}-windows-x64-setup.exe.sha256
+
+  linux:
+    needs: check
+    # The oldest runner image, so the binary links against an older glibc and runs on more distributions.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --all-targets
+      - run: cargo build --release --locked
+      - name: Package tar.gz
         run: |
-          $zip = "snowfall-$env:TAG-windows-x64"
-          $setup = "snowfall-$env:TAG-windows-x64-setup.exe"
-          $lines = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name=$env:TAG --jq .body
-          $notes = ($lines | Where-Object { $_ -notmatch 'Full Changelog' }) -join "`n"
-          Set-Content -Path notes.md -Value $notes -Encoding utf8
-          $flags = @()
-          if ($env:TAG -match '-') { $flags += '--prerelease' }
-          gh release create $env:TAG "$zip.zip" "$zip.zip.sha256" $setup "$setup.sha256" --notes-file notes.md --title "Snowfall $env:TAG" @flags
+          name="snowfall-$TAG-linux-x64"
+          mkdir "$name"
+          cp target/release/snowfall README.md LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          if-no-files-found: error
+          path: |
+            snowfall-${{ github.ref_name }}-linux-x64.tar.gz
+            snowfall-${{ github.ref_name }}-linux-x64.tar.gz.sha256
+
+  macos:
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --all-targets
+      - name: Build universal binary
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          lipo -create -output snowfall \
+            target/aarch64-apple-darwin/release/snowfall \
+            target/x86_64-apple-darwin/release/snowfall
+          # Apple Silicon refuses to run unsigned code; an ad-hoc signature is enough for that.
+          codesign --force --sign - snowfall
+          lipo -info snowfall
+      - name: Package tar.gz
+        run: |
+          name="snowfall-$TAG-macos-universal"
+          mkdir "$name"
+          cp snowfall README.md LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: |
+            snowfall-${{ github.ref_name }}-macos-universal.tar.gz
+            snowfall-${{ github.ref_name }}-macos-universal.tar.gz.sha256
+
+  publish:
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        run: |
+          body=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body)
+          printf '%s\n' "$body" | grep -v 'Full Changelog' > notes.md || true
+          flags=()
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" dist/* --notes-file notes.md --title "Snowfall $TAG" "${flags[@]}"

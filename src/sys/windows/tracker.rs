@@ -1,6 +1,6 @@
 //! Tracker module for enumerating real application windows.
 
-use crate::platform::{WinRect, WindowInfo};
+use crate::geometry::{Accumulate, WinRect, WindowInfo};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::Mutex;
@@ -546,8 +546,12 @@ pub fn dump_all(own: HWND) -> String {
     let origin_y =
         unsafe { GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_YVIRTUALSCREEN) };
     let virt = (origin_x, origin_y, origin_x + width, origin_y + height);
-    let floor = crate::platform::floor_y();
-    let segments = crate::platform::build_segments(&accepted_windows, virt, floor);
+    let segments = crate::geometry::build_segments(
+        &accepted_windows,
+        &super::monitors::monitors(virt),
+        virt.1,
+        Accumulate::default(),
+    );
 
     let mut output = String::new();
     let mut accepted_idx = 0;
@@ -599,7 +603,7 @@ pub fn dump_all(own: HWND) -> String {
                     .collect();
                 output.push_str(&format!("  segments: [{}]\n", seg_strs.join(", ")));
             } else {
-                let occluders = crate::platform::explain_occlusion(&accepted_windows, accepted_idx);
+                let occluders = crate::geometry::explain_occlusion(&accepted_windows, accepted_idx);
                 if !occluders.is_empty() {
                     let occ_details: Vec<String> = occluders
                         .iter()

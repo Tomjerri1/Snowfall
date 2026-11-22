@@ -1,6 +1,7 @@
 //! Tray module for system tray icon and menu handling.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use crate::app::AppState;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, TRUE, WPARAM};
@@ -25,47 +26,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 pub const WM_TRAY_CALLBACK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 pub const TRAY_ID: u32 = 1;
 
-pub struct AppState {
-    pub paused: AtomicBool,
-    pub target_flakes: AtomicUsize,
-    pub target_fps: AtomicUsize,
-    pub clear_requested: AtomicBool,
-    pub quit: AtomicBool,
-    pub tray_hwnd: AtomicUsize,
-    pub settings_hwnd: AtomicUsize,
-    pub opacity: AtomicUsize,
-    pub strength: AtomicUsize,
-    pub height_limit: AtomicBool,
-    pub acc_windows: AtomicBool,
-    pub acc_dock: AtomicBool,
-    pub acc_ground: AtomicBool,
-    pub mouse_flakes: AtomicBool,
-    pub update_state: AtomicUsize,
-    pub update_tag: std::sync::Mutex<String>,
-}
-
-impl AppState {
-    pub fn new() -> Self {
-        Self {
-            paused: AtomicBool::new(false),
-            target_flakes: AtomicUsize::new(400),
-            target_fps: AtomicUsize::new(30),
-            clear_requested: AtomicBool::new(false),
-            quit: AtomicBool::new(false),
-            tray_hwnd: AtomicUsize::new(0),
-            settings_hwnd: AtomicUsize::new(0),
-            opacity: AtomicUsize::new(100),
-            strength: AtomicUsize::new(100),
-            height_limit: AtomicBool::new(true),
-            acc_windows: AtomicBool::new(true),
-            acc_dock: AtomicBool::new(true),
-            acc_ground: AtomicBool::new(false),
-            mouse_flakes: AtomicBool::new(true),
-            update_state: AtomicUsize::new(0),
-            update_tag: std::sync::Mutex::new(String::new()),
-        }
-    }
-}
+/// HWND of the tray message window, 0 until the tray thread has created it.
+pub static TRAY_HWND: AtomicUsize = AtomicUsize::new(0);
 
 pub struct TrayIcon {
     hwnd: HWND,
@@ -136,7 +98,7 @@ unsafe extern "system" fn tray_wnd_proc(
                 if l == WM_RBUTTONUP || l == 0x0400 {
                     show_context_menu(hwnd, state_arc);
                 } else if l == WM_LBUTTONUP {
-                    crate::settings_ui::toggle(state_arc);
+                    super::settings_ui::toggle(state_arc);
                 }
             }
             LRESULT(0)
@@ -185,7 +147,7 @@ pub fn spawn_tray_thread(state: Arc<AppState>) -> JoinHandle<()> {
         )
         .expect("Failed to create tray window");
 
-        state.tray_hwnd.store(hwnd.0 as usize, Ordering::Release);
+        TRAY_HWND.store(hwnd.0 as usize, Ordering::Release);
 
         let state_box = Box::new(state.clone());
         let state_ptr = Box::into_raw(state_box) as isize;
@@ -193,7 +155,7 @@ pub fn spawn_tray_thread(state: Arc<AppState>) -> JoinHandle<()> {
 
         let tray_icon = TrayIcon::new(hwnd);
 
-        crate::settings_ui::create_hidden(&state);
+        super::settings_ui::create_hidden(&state);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).into() {
@@ -368,7 +330,7 @@ pub unsafe fn show_context_menu(hwnd: HWND, state: &Arc<AppState>) {
 
         match cmd_id {
             1007 => {
-                crate::settings_ui::toggle(state);
+                super::settings_ui::toggle(state);
             }
             1001 => {
                 let current = state.paused.load(Ordering::Relaxed);

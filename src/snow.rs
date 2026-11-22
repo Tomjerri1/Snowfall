@@ -1,6 +1,6 @@
 //! Snow module for flakes, piles, physics, and drawing.
 
-use crate::platform::Segment;
+use crate::geometry::Segment;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Stroke, Transform};

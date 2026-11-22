@@ -1,10 +1,4 @@
-//! Platform module for visible top-edge segments and floor.
-
-use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
-use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
-};
-use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA};
+//! Platform-independent geometry: window rects, monitors and the visible top-edge segments snow can land on.
 
 #[derive(Debug, Clone, Copy)]
 pub struct WinRect {
@@ -31,23 +25,6 @@ pub struct Segment {
     pub full_right: f32,
 }
 
-pub fn floor_y() -> f32 {
-    let mut rect = RECT::default();
-    unsafe {
-        let _ = SystemParametersInfoW(
-            SPI_GETWORKAREA,
-            0,
-            Some(&mut rect as *mut RECT as *mut std::ffi::c_void),
-            Default::default(),
-        );
-    }
-    if rect.bottom > 0 {
-        rect.bottom as f32
-    } else {
-        1080.0
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Monitor {
     pub left: i32,
@@ -59,55 +36,9 @@ pub struct Monitor {
     pub primary: bool,
 }
 
-unsafe extern "system" fn monitor_enum_proc(
-    hmon: HMONITOR,
-    _hdc: HDC,
-    _rect: *mut RECT,
-    lparam: LPARAM,
-) -> BOOL {
-    let list = &mut *(lparam.0 as *mut Vec<Monitor>);
-    let mut mi = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-        ..Default::default()
-    };
-    if GetMonitorInfoW(hmon, &mut mi).as_bool() {
-        list.push(Monitor {
-            left: mi.rcMonitor.left,
-            top: mi.rcMonitor.top,
-            right: mi.rcMonitor.right,
-            bottom: mi.rcMonitor.bottom,
-            work_top: mi.rcWork.top,
-            work_bottom: mi.rcWork.bottom,
-            primary: mi.dwFlags & 1 != 0,
-        });
-    }
-    BOOL(1)
-}
-
-/// All monitors, primary first, then left-to-right. `virt` is (left, top, right, bottom) of the virtual screen and is used for a single fallback monitor when enumeration returns nothing.
-pub fn monitors(virt: (i32, i32, i32, i32)) -> Vec<Monitor> {
-    let mut list: Vec<Monitor> = Vec::new();
-    unsafe {
-        let _ = EnumDisplayMonitors(
-            HDC::default(),
-            None,
-            Some(monitor_enum_proc),
-            LPARAM(&mut list as *mut Vec<Monitor> as isize),
-        );
-    }
-    if list.is_empty() {
-        list.push(Monitor {
-            left: virt.0,
-            top: virt.1,
-            right: virt.2,
-            bottom: virt.3,
-            work_top: virt.1,
-            work_bottom: floor_y() as i32,
-            primary: true,
-        });
-    }
+/// Orders monitors primary first, then left-to-right, top-to-bottom.
+pub fn sort_monitors(list: &mut [Monitor]) {
     list.sort_by_key(|m| (!m.primary, m.left, m.top));
-    list
 }
 
 pub fn subtract_intervals(x1: f32, x2: f32, blockers: &[(f32, f32)]) -> Vec<(f32, f32)> {
@@ -142,42 +73,40 @@ pub fn subtract_intervals(x1: f32, x2: f32, blockers: &[(f32, f32)]) -> Vec<(f32
     intervals
 }
 
-pub trait BuildSegmentsArg3 {
-    fn build(self, windows_list: &[WindowInfo], virt: (i32, i32, i32, i32)) -> Vec<Segment>;
+/// Which surfaces collect snow.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Accumulate {
+    pub windows: bool,
+    pub dock: bool,
+    pub ground: bool,
 }
 
-impl BuildSegmentsArg3 for f32 {
-    fn build(self, windows_list: &[WindowInfo], virt: (i32, i32, i32, i32)) -> Vec<Segment> {
-        build_segments_inner(windows_list, virt, self, true, true, false)
+impl Default for Accumulate {
+    fn default() -> Self {
+        Self {
+            windows: true,
+            dock: true,
+            ground: false,
+        }
     }
 }
 
-impl BuildSegmentsArg3 for (f32, bool, bool, bool) {
-    fn build(self, windows_list: &[WindowInfo], virt: (i32, i32, i32, i32)) -> Vec<Segment> {
-        build_segments_inner(windows_list, virt, self.0, self.1, self.2, self.3)
-    }
-}
-
-pub fn build_segments<A: BuildSegmentsArg3>(
+/// Builds the landing segments for `windows_list` (front-to-back z-order) and the per-monitor dock/ground floors.
+/// `mons` must be primary first (see `sort_monitors`) and non-empty; `virt_top` is the top of the virtual screen.
+pub fn build_segments(
     windows_list: &[WindowInfo],
-    virt: (i32, i32, i32, i32),
-    arg3: A,
+    mons: &[Monitor],
+    virt_top: i32,
+    acc: Accumulate,
 ) -> Vec<Segment> {
-    arg3.build(windows_list, virt)
-}
-
-fn build_segments_inner(
-    windows_list: &[WindowInfo],
-    virt: (i32, i32, i32, i32),
-    _floor: f32,
-    windows: bool,
-    dock: bool,
-    ground: bool,
-) -> Vec<Segment> {
-    let virt_top = virt.1 as f32;
+    let Accumulate {
+        windows,
+        dock,
+        ground,
+    } = acc;
+    let virt_top = virt_top as f32;
 
     let mut segments = Vec::new();
-    let mons = monitors(virt);
 
     // Each monitor gets its own dock floor (at its work-area bottom) and its own ground (at its bottom edge).
     for (i, m) in mons.iter().enumerate() {
@@ -274,6 +203,7 @@ fn build_segments_inner(
     segments
 }
 
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows --dump uses it
 pub fn explain_occlusion(windows: &[WindowInfo], idx: usize) -> Vec<isize> {
     let win = &windows[idx];
     let left = win.rect.left as f32;

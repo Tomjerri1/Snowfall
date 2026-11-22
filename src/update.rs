@@ -1,11 +1,6 @@
-use windows::core::PCWSTR;
-use windows::Win32::Networking::WinHttp::{
-    WinHttpAddRequestHeaders, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
-    WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
-    WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_ADDREQ_FLAG_ADD,
-    WINHTTP_ADDREQ_FLAG_REPLACE, WINHTTP_FLAG_SECURE, WINHTTP_QUERY_FLAG_NUMBER,
-    WINHTTP_QUERY_STATUS_CODE,
-};
+use crate::app::AppState;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 pub fn parse_version(s: &str) -> Option<(u64, u64, u64, bool)> {
     let s = s.trim();
@@ -116,115 +111,43 @@ pub fn extract_tag_name(json: &str) -> Option<String> {
     None
 }
 
+const LATEST_RELEASE_HOST: &str = "api.github.com";
+const LATEST_RELEASE_PATH: &str = "/repos/Tomjerri1/Snowfall/releases/latest";
+
+/// Fetches the tag of the latest GitHub release through the platform HTTP client.
 pub fn fetch_latest_tag() -> Result<String, String> {
-    unsafe { fetch_latest_tag_impl() }
+    let body = crate::sys::http_get(LATEST_RELEASE_HOST, LATEST_RELEASE_PATH)?;
+    extract_tag_name(&body).ok_or_else(|| "tag not found".to_string())
 }
 
-unsafe fn fetch_latest_tag_impl() -> Result<String, String> {
-    let h_session = WinHttpOpen(
-        windows::core::w!("Snowfall-update-check"),
-        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-        PCWSTR::null(),
-        PCWSTR::null(),
-        0,
-    );
-    if h_session.is_null() {
-        return Err("WinHttpOpen failed".to_string());
-    }
+/// `AppState::update_state` values.
+pub const STATE_CHECKING: usize = 1;
+pub const STATE_UP_TO_DATE: usize = 2;
+pub const STATE_AVAILABLE: usize = 3;
+pub const STATE_FAILED: usize = 4;
 
-    let mut h_connect = std::ptr::null_mut();
-    let mut h_request = std::ptr::null_mut();
-
-    let body_res = (|| -> Result<String, String> {
-        h_connect = WinHttpConnect(h_session, windows::core::w!("api.github.com"), 443, 0);
-        if h_connect.is_null() {
-            return Err("WinHttpConnect failed".to_string());
-        }
-
-        h_request = WinHttpOpenRequest(
-            h_connect,
-            windows::core::w!("GET"),
-            windows::core::w!("/repos/Tomjerri1/Snowfall/releases/latest"),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            std::ptr::null(),
-            WINHTTP_FLAG_SECURE,
-        );
-        if h_request.is_null() {
-            return Err("WinHttpOpenRequest failed".to_string());
-        }
-
-        let headers =
-            encode_wide("Accept: application/vnd.github+json\r\nUser-Agent: Snowfall-update-check");
-        WinHttpAddRequestHeaders(
-            h_request,
-            &headers,
-            WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE,
-        )
-        .map_err(|e| format!("WinHttpAddRequestHeaders failed: {}", e))?;
-
-        let _ = WinHttpSetTimeouts(h_session, 5000, 5000, 5000, 5000);
-
-        WinHttpSendRequest(h_request, None, None, 0, 0, 0)
-            .map_err(|e| format!("WinHttpSendRequest failed: {}", e))?;
-
-        WinHttpReceiveResponse(h_request, std::ptr::null_mut())
-            .map_err(|e| format!("WinHttpReceiveResponse failed: {}", e))?;
-
-        let mut status_code: u32 = 0;
-        let mut status_size = std::mem::size_of::<u32>() as u32;
-        let mut index = 0;
-        WinHttpQueryHeaders(
-            h_request,
-            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-            windows::core::PCWSTR::null(),
-            Some(&mut status_code as *mut u32 as *mut std::ffi::c_void),
-            &mut status_size,
-            &mut index,
-        )
-        .map_err(|e| format!("WinHttpQueryHeaders failed: {}", e))?;
-
-        if status_code != 200 {
-            return Err(format!("HTTP status: {}", status_code));
-        }
-
-        let mut body_bytes = Vec::new();
-        let mut buffer = [0u8; 65536];
-        loop {
-            let mut bytes_read = 0u32;
-            WinHttpReadData(
-                h_request,
-                buffer.as_mut_ptr() as *mut std::ffi::c_void,
-                buffer.len() as u32,
-                &mut bytes_read,
-            )
-            .map_err(|e| format!("WinHttpReadData failed: {}", e))?;
-
-            if bytes_read == 0 {
-                break;
+/// Checks for a newer release on a background thread and records the outcome in `state.update_state`
+/// (and the new tag in `state.update_tag`). `done` runs on that thread when the check has finished.
+pub fn start_check(state: &Arc<AppState>, done: impl FnOnce() + Send + 'static) {
+    state.update_state.store(STATE_CHECKING, Ordering::Release);
+    let state = state.clone();
+    std::thread::spawn(move || {
+        let outcome = match fetch_latest_tag() {
+            Ok(tag) if parse_version(&tag).is_some() => {
+                if is_newer(env!("CARGO_PKG_VERSION"), &tag) {
+                    if let Ok(mut lock) = state.update_tag.lock() {
+                        *lock = tag;
+                    }
+                    STATE_AVAILABLE
+                } else {
+                    STATE_UP_TO_DATE
+                }
             }
-            body_bytes.extend_from_slice(&buffer[..bytes_read as usize]);
-        }
-
-        let body = String::from_utf8_lossy(&body_bytes).to_string();
-        extract_tag_name(&body).ok_or_else(|| "tag not found".to_string())
-    })();
-
-    if !h_request.is_null() {
-        let _ = WinHttpCloseHandle(h_request);
-    }
-    if !h_connect.is_null() {
-        let _ = WinHttpCloseHandle(h_connect);
-    }
-    if !h_session.is_null() {
-        let _ = WinHttpCloseHandle(h_session);
-    }
-
-    body_res
-}
-
-fn encode_wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
+            _ => STATE_FAILED,
+        };
+        state.update_state.store(outcome, Ordering::Release);
+        done();
+    });
 }
 
 #[cfg(test)]

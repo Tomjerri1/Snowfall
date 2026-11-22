@@ -1,8 +1,6 @@
-//! Overlay module for layered window and presentation.
+//! Layered, click-through overlay window and presentation through `UpdateLayeredWindow`.
 
-use crate::tray::AppState;
 use std::ffi::c_void;
-use std::sync::Arc;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
@@ -61,7 +59,7 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM
 }
 
 impl Overlay {
-    pub fn new(_state: Arc<AppState>) -> Self {
+    pub fn new() -> Self {
         unsafe {
             let hinstance = HINSTANCE(std::ptr::null_mut());
             let class_name = windows::core::w!("SnowfallOverlayClass");
@@ -109,7 +107,7 @@ impl Overlay {
             )
             .expect("Failed to create overlay window");
 
-            crate::tracker::OVERLAY_HWND
+            super::tracker::OVERLAY_HWND
                 .store(hwnd.0 as isize, std::sync::atomic::Ordering::Release);
 
             // Register global hotkey Ctrl+Alt+Q (ID 1)
@@ -156,6 +154,20 @@ impl Overlay {
                 bits: bits_ptr,
             }
         }
+    }
+
+    /// Virtual screen as (left, top, right, bottom).
+    pub fn bounds(&self) -> (i32, i32, i32, i32) {
+        (
+            self.origin_x,
+            self.origin_y,
+            self.origin_x + self.width,
+            self.origin_y + self.height,
+        )
+    }
+
+    pub fn hwnd(&self) -> HWND {
+        self.hwnd
     }
 
     pub fn pixmap_mut(&mut self) -> tiny_skia::PixmapMut<'_> {

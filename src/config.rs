@@ -1,15 +1,33 @@
-//! Persistent settings stored in %APPDATA%\Snowfall\settings.txt (simple key=value lines).
+//! Persistent settings (simple key=value lines) stored in the per-user config directory:
+//! `%APPDATA%\Snowfall\settings.txt` on Windows, `~/Library/Application Support/Snowfall/settings.txt` on macOS,
+//! `$XDG_CONFIG_HOME/snowfall/settings.txt` (or `~/.config/...`) elsewhere.
 
-use crate::tray::AppState;
+use crate::app::AppState;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
+fn config_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        Some(PathBuf::from(std::env::var_os("APPDATA")?).join("Snowfall"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = PathBuf::from(std::env::var_os("HOME")?);
+        Some(home.join("Library/Application Support/Snowfall"))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let base = match std::env::var_os("XDG_CONFIG_HOME") {
+            Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+            _ => PathBuf::from(std::env::var_os("HOME")?).join(".config"),
+        };
+        Some(base.join("snowfall"))
+    }
+}
+
 fn config_path() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    let mut p = PathBuf::from(base);
-    p.push("Snowfall");
-    p.push("settings.txt");
-    Some(p)
+    Some(config_dir()?.join("settings.txt"))
 }
 
 /// Current values of all persisted settings, used to detect changes.
