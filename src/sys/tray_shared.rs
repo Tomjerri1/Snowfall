@@ -66,7 +66,7 @@ pub fn snowflake_rgba(size: u32) -> Vec<u8> {
 
     // tiny-skia stores premultiplied RGBA.
     let mut data = Vec::with_capacity(pixmap.data().len());
-    for px in pixmap.data().chunks_exact(4) {
+    for px in pixmap.data().as_chunks::<4>().0 {
         let alpha = px[3];
         let straight = |c: u8| {
             if alpha == 0 {
