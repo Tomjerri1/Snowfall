@@ -23,6 +23,9 @@ windows = { version = "0.58", features = [
     "Win32_Networking_WinHttp"
 ] }
 
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", features = ["shape", "randr"] }
+
 [build-dependencies]
 winresource = "0.1"
 

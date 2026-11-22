@@ -17,6 +17,9 @@ mod curl_http;
 #[cfg(unix)]
 pub use curl_http::http_get;
 
+#[cfg(all(unix, not(target_os = "macos")))]
+mod x11;
+
 #[cfg(not(windows))]
 compile_error!("Snowfall has no platform backend for this OS yet");
 
