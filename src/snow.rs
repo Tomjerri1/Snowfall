@@ -323,6 +323,14 @@ impl Snow {
         }
     }
 
+    fn add_capped(h: f32, add: f32, cap: f32) -> f32 {
+        if h >= cap {
+            h
+        } else {
+            (h + add).min(cap)
+        }
+    }
+
     fn hard_cap(height_limit: bool, owner: Option<isize>, pile_y: f32) -> f32 {
         if height_limit {
             if is_floor_like(owner) {
@@ -1631,20 +1639,20 @@ impl Snow {
                         if target_col > 0 {
                             let c_left = target_col - 1;
                             pile.heights[c_left] =
-                                (pile.heights[c_left] + 0.25 * amount).min(max_h);
+                                Self::add_capped(pile.heights[c_left], 0.25 * amount, max_h);
                             touched_min = touched_min.min(c_left);
                             touched_max = touched_max.max(c_left);
                         }
 
                         pile.heights[target_col] =
-                            (pile.heights[target_col] + 0.5 * amount).min(max_h);
+                            Self::add_capped(pile.heights[target_col], 0.5 * amount, max_h);
                         touched_min = touched_min.min(target_col);
                         touched_max = touched_max.max(target_col);
 
                         if target_col + 1 < len {
                             let c_right = target_col + 1;
                             pile.heights[c_right] =
-                                (pile.heights[c_right] + 0.25 * amount).min(max_h);
+                                Self::add_capped(pile.heights[c_right], 0.25 * amount, max_h);
                             touched_min = touched_min.min(c_right);
                             touched_max = touched_max.max(c_right);
                         }
@@ -1857,6 +1865,31 @@ impl Snow {
                 )
             {
                 pile.dirty = true;
+            }
+        }
+
+        if height_limit {
+            let settle = 1.0 - (-3.0 * dt).exp();
+            for (owner, pile) in &mut self.piles {
+                if !is_floor_like(*owner) {
+                    continue;
+                }
+                let cap = Self::landing_cap(true, *owner, pile.y);
+                let mut changed = false;
+                for h in pile.heights.iter_mut() {
+                    if *h > cap {
+                        let excess = *h - cap;
+                        *h = if excess < 0.05 {
+                            cap
+                        } else {
+                            *h - excess * settle
+                        };
+                        changed = true;
+                    }
+                }
+                if changed {
+                    pile.dirty = true;
+                }
             }
         }
 
