@@ -1,6 +1,9 @@
 //! Platform module for visible top-edge segments and floor.
 
-use windows::Win32::Foundation::RECT;
+use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+};
 use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA};
 
 #[derive(Debug, Clone, Copy)]
@@ -43,6 +46,68 @@ pub fn floor_y() -> f32 {
     } else {
         1080.0
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Monitor {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+    pub work_top: i32,
+    pub work_bottom: i32,
+    pub primary: bool,
+}
+
+unsafe extern "system" fn monitor_enum_proc(
+    hmon: HMONITOR,
+    _hdc: HDC,
+    _rect: *mut RECT,
+    lparam: LPARAM,
+) -> BOOL {
+    let list = &mut *(lparam.0 as *mut Vec<Monitor>);
+    let mut mi = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+        list.push(Monitor {
+            left: mi.rcMonitor.left,
+            top: mi.rcMonitor.top,
+            right: mi.rcMonitor.right,
+            bottom: mi.rcMonitor.bottom,
+            work_top: mi.rcWork.top,
+            work_bottom: mi.rcWork.bottom,
+            primary: mi.dwFlags & 1 != 0,
+        });
+    }
+    BOOL(1)
+}
+
+/// All monitors, primary first, then left-to-right. `virt` is (left, top, right, bottom) of the virtual screen and is used for a single fallback monitor when enumeration returns nothing.
+pub fn monitors(virt: (i32, i32, i32, i32)) -> Vec<Monitor> {
+    let mut list: Vec<Monitor> = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(
+            HDC::default(),
+            None,
+            Some(monitor_enum_proc),
+            LPARAM(&mut list as *mut Vec<Monitor> as isize),
+        );
+    }
+    if list.is_empty() {
+        list.push(Monitor {
+            left: virt.0,
+            top: virt.1,
+            right: virt.2,
+            bottom: virt.3,
+            work_top: virt.1,
+            work_bottom: floor_y() as i32,
+            primary: true,
+        });
+    }
+    list.sort_by_key(|m| (!m.primary, m.left, m.top));
+    list
 }
 
 pub fn subtract_intervals(x1: f32, x2: f32, blockers: &[(f32, f32)]) -> Vec<(f32, f32)> {
@@ -104,50 +169,40 @@ pub fn build_segments<A: BuildSegmentsArg3>(
 fn build_segments_inner(
     windows_list: &[WindowInfo],
     virt: (i32, i32, i32, i32),
-    floor: f32,
+    _floor: f32,
     windows: bool,
     dock: bool,
     ground: bool,
 ) -> Vec<Segment> {
-    let virt_left = virt.0 as f32;
     let virt_top = virt.1 as f32;
-    let virt_right = virt.2 as f32;
-    let virt_bottom = virt.3 as f32;
-
-    let mut work_rect = RECT::default();
-    unsafe {
-        let _ = SystemParametersInfoW(
-            SPI_GETWORKAREA,
-            0,
-            Some(&mut work_rect as *mut RECT as *mut std::ffi::c_void),
-            Default::default(),
-        );
-    }
-    let work_area_top = work_rect.top as f32;
 
     let mut segments = Vec::new();
+    let mons = monitors(virt);
 
-    // Floor segment spans the whole virtual screen width at y = floor, never reduced by occlusion.
-    if dock {
-        segments.push(Segment {
-            x1: virt_left,
-            x2: virt_right,
-            y: floor,
-            owner: None,
-            full_left: virt_left,
-            full_right: virt_right,
-        });
-    }
-
-    if ground {
-        segments.push(Segment {
-            x1: virt_left,
-            x2: virt_right,
-            y: virt_bottom,
-            owner: Some(crate::snow::GROUND_ID),
-            full_left: virt_left,
-            full_right: virt_right,
-        });
+    // Each monitor gets its own dock floor (at its work-area bottom) and its own ground (at its bottom edge).
+    for (i, m) in mons.iter().enumerate() {
+        let left = m.left as f32;
+        let right = m.right as f32;
+        if dock {
+            segments.push(Segment {
+                x1: left,
+                x2: right,
+                y: m.work_bottom as f32,
+                owner: crate::snow::dock_owner(i),
+                full_left: left,
+                full_right: right,
+            });
+        }
+        if ground {
+            segments.push(Segment {
+                x1: left,
+                x2: right,
+                y: m.bottom as f32,
+                owner: crate::snow::ground_owner(i),
+                full_left: left,
+                full_right: right,
+            });
+        }
     }
 
     // Window top-edge segments
@@ -157,13 +212,25 @@ fn build_segments_inner(
             let right = win.rect.right as f32;
             let top = win.rect.top as f32;
 
-            // Skip a window only if its top <= virtual top + 2, or it is truly docked/maximized:
-            // left <= virt left + 2 && right >= virt right - 2 && top <= work-area top + 2.
-            if top <= virt_top + 2.0
-                || (left <= virt_left + 2.0
-                    && right >= virt_right - 2.0
-                    && top <= work_area_top + 2.0)
-            {
+            // Skip a window whose top is at the virtual top, or that fills the work area of the monitor it sits on (maximized/docked).
+            let bottom = win.rect.bottom as f32;
+            let win_cx = (left + right) * 0.5;
+            let win_cy = (top + bottom) * 0.5;
+            let win_mon = mons
+                .iter()
+                .find(|m| {
+                    win_cx >= m.left as f32
+                        && win_cx < m.right as f32
+                        && win_cy >= m.top as f32
+                        && win_cy < m.bottom as f32
+                })
+                .or_else(|| mons.first());
+            let covers_work_area = win_mon.is_some_and(|m| {
+                left <= m.left as f32 + 2.0
+                    && right >= m.right as f32 - 2.0
+                    && top <= m.work_top as f32 + 2.0
+            });
+            if top <= virt_top + 2.0 || covers_work_area {
                 continue;
             }
 
