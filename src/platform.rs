@@ -213,9 +213,9 @@ fn build_segments_inner(
             let top = win.rect.top as f32;
 
             // Skip a window whose top is at the virtual top, or that fills the work area of the monitor it sits on (maximized/docked).
-            let bottom = win.rect.bottom as f32;
+            // Pick the monitor under the window's top edge (slightly below it, to ignore invisible borders).
             let win_cx = (left + right) * 0.5;
-            let win_cy = (top + bottom) * 0.5;
+            let win_cy = top + 16.0;
             let win_mon = mons
                 .iter()
                 .find(|m| {
