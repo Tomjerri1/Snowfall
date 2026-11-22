@@ -7,6 +7,7 @@ use crate::geometry::{sort_monitors, Monitor};
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;
 
+#[derive(Clone)]
 pub struct Layout {
     /// Virtual screen as (left, top, right, bottom).
     pub bounds: (i32, i32, i32, i32),

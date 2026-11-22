@@ -28,8 +28,10 @@ pub use x11::X11Backend as PlatformBackend;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::MacBackend as PlatformBackend;
 
-#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+#[cfg(not(any(windows, unix)))]
 compile_error!("Snowfall has no platform backend for this OS yet");
 
 /// Opaque id of a top-level window. Positive values are real windows, negative ones are reserved for synthetic owners (see `snow::GROUND_ID`).
