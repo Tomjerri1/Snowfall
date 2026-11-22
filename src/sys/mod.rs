@@ -23,6 +23,9 @@ mod x11;
 #[cfg(all(unix, not(target_os = "macos")))]
 pub use x11::X11Backend as PlatformBackend;
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
 compile_error!("Snowfall has no platform backend for this OS yet");
 

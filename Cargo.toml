@@ -28,6 +28,16 @@ x11rb = { version = "0.13", features = ["shape", "randr", "shm"] }
 rustix = { version = "1", default-features = false, features = ["std", "fs", "mm"] }
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-core-graphics = "0.3"
+objc2-core-foundation = "0.3"
+objc2-quartz-core = "0.3"
+tray-icon = "0.26"
+global-hotkey = "0.10"
+
 [build-dependencies]
 winresource = "0.1"
 
