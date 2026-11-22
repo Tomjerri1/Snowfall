@@ -1,3 +1,7 @@
+use crate::app::AppState;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
 pub fn parse_version(s: &str) -> Option<(u64, u64, u64, bool)> {
     let s = s.trim();
     let s = if let Some(stripped) = s.strip_prefix('v').or_else(|| s.strip_prefix('V')) {
@@ -114,6 +118,36 @@ const LATEST_RELEASE_PATH: &str = "/repos/Tomjerri1/Snowfall/releases/latest";
 pub fn fetch_latest_tag() -> Result<String, String> {
     let body = crate::sys::http_get(LATEST_RELEASE_HOST, LATEST_RELEASE_PATH)?;
     extract_tag_name(&body).ok_or_else(|| "tag not found".to_string())
+}
+
+/// `AppState::update_state` values.
+pub const STATE_CHECKING: usize = 1;
+pub const STATE_UP_TO_DATE: usize = 2;
+pub const STATE_AVAILABLE: usize = 3;
+pub const STATE_FAILED: usize = 4;
+
+/// Checks for a newer release on a background thread and records the outcome in `state.update_state`
+/// (and the new tag in `state.update_tag`). `done` runs on that thread when the check has finished.
+pub fn start_check(state: &Arc<AppState>, done: impl FnOnce() + Send + 'static) {
+    state.update_state.store(STATE_CHECKING, Ordering::Release);
+    let state = state.clone();
+    std::thread::spawn(move || {
+        let outcome = match fetch_latest_tag() {
+            Ok(tag) if parse_version(&tag).is_some() => {
+                if is_newer(env!("CARGO_PKG_VERSION"), &tag) {
+                    if let Ok(mut lock) = state.update_tag.lock() {
+                        *lock = tag;
+                    }
+                    STATE_AVAILABLE
+                } else {
+                    STATE_UP_TO_DATE
+                }
+            }
+            _ => STATE_FAILED,
+        };
+        state.update_state.store(outcome, Ordering::Release);
+        done();
+    });
 }
 
 #[cfg(test)]

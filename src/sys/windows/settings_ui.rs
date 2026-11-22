@@ -1066,30 +1066,8 @@ fn handle_click(state: &Arc<AppState>, x: i32, y: i32) -> bool {
                     windows::Win32::UI::WindowsAndMessaging::SW_SHOW,
                 );
             }
-        } else if update_state != 1 {
-            state.update_state.store(1, Ordering::Release);
-            let state_clone = state.clone();
-            std::thread::spawn(move || {
-                match crate::update::fetch_latest_tag() {
-                    Ok(tag) => {
-                        if crate::update::parse_version(&tag).is_none() {
-                            state_clone.update_state.store(4, Ordering::Release);
-                        } else {
-                            let newer = crate::update::is_newer(env!("CARGO_PKG_VERSION"), &tag);
-                            if newer {
-                                if let Ok(mut lock) = state_clone.update_tag.lock() {
-                                    *lock = tag;
-                                }
-                                state_clone.update_state.store(3, Ordering::Release);
-                            } else {
-                                state_clone.update_state.store(2, Ordering::Release);
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        state_clone.update_state.store(4, Ordering::Release);
-                    }
-                }
+        } else if update_state != crate::update::STATE_CHECKING {
+            crate::update::start_check(state, || {
                 let hwnd_val = SETTINGS_HWND.load(Ordering::Acquire);
                 if hwnd_val != 0 {
                     let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
