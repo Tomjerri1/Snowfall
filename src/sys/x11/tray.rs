@@ -4,6 +4,9 @@
 //! `AppState` each time it opens.
 
 use crate::app::AppState;
+use crate::sys::tray_shared::{
+    nearest, snowflake_rgba, Presets, FPS, INTENSITY, OPACITY, STRENGTH,
+};
 use crate::update;
 use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::{CheckmarkItem, RadioGroup, RadioItem, StandardItem, SubMenu};
@@ -13,17 +16,6 @@ use std::sync::Arc;
 
 const RELEASES_URL: &str = "https://github.com/Tomjerri1/Snowfall/releases/latest";
 
-const INTENSITY: &[(&str, usize)] = &[
-    ("Light", 150),
-    ("Normal", 400),
-    ("Medium", 800),
-    ("Heavy", 1500),
-    ("Blizzard", 3000),
-];
-const OPACITY: &[(&str, usize)] = &[("25%", 25), ("50%", 50), ("75%", 75), ("100%", 100)];
-const STRENGTH: &[(&str, usize)] = &[("50%", 50), ("100%", 100), ("150%", 150), ("200%", 200)];
-const FPS: &[(&str, usize)] = &[("20", 20), ("30", 30), ("60", 60)];
-
 pub struct SnowTray {
     state: Arc<AppState>,
     icon: Vec<Icon>,
@@ -32,16 +24,12 @@ pub struct SnowTray {
 /// A submenu with one radio item per preset; the preset closest to the current value is selected.
 fn radio(
     label: &str,
-    options: &'static [(&'static str, usize)],
+    options: Presets,
     field: fn(&AppState) -> &AtomicUsize,
     state: &AppState,
 ) -> MenuItem<SnowTray> {
     let current = field(state).load(Ordering::Relaxed);
-    let selected = options
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, (_, value))| value.abs_diff(current))
-        .map_or(0, |(index, _)| index);
+    let selected = nearest(options, current);
     SubMenu {
         label: label.into(),
         submenu: vec![RadioGroup {
@@ -182,55 +170,12 @@ impl ksni::Tray for SnowTray {
     }
 }
 
-/// A white snowflake on a blue disc, as ARGB32 in network byte order.
+/// The shared snowflake as ARGB32 in network byte order, which is what the protocol wants.
 fn snowflake_icon(size: u32) -> Icon {
-    use tiny_skia::{FillRule, LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
-
-    let mut pixmap = Pixmap::new(size, size).expect("icon size is non-zero");
-    let center = size as f32 / 2.0;
-
-    let mut paint = Paint::default();
-    paint.set_color_rgba8(0x2E, 0x7D, 0xD7, 0xFF);
-    if let Some(disc) = PathBuilder::from_circle(center, center, center - 0.5) {
-        pixmap.fill_path(
-            &disc,
-            &paint,
-            FillRule::Winding,
-            Transform::identity(),
-            None,
-        );
-    }
-
-    paint.set_color_rgba8(0xFF, 0xFF, 0xFF, 0xFF);
-    let stroke = Stroke {
-        width: size as f32 / 11.0,
-        line_cap: LineCap::Round,
-        ..Default::default()
-    };
-    let arm = center * 0.68;
-    let mut builder = PathBuilder::new();
-    for step in 0..3 {
-        let angle = step as f32 * std::f32::consts::PI / 3.0;
-        let (dx, dy) = (angle.cos() * arm, angle.sin() * arm);
-        builder.move_to(center - dx, center - dy);
-        builder.line_to(center + dx, center + dy);
-    }
-    if let Some(arms) = builder.finish() {
-        pixmap.stroke_path(&arms, &paint, &stroke, Transform::identity(), None);
-    }
-
-    // tiny-skia stores premultiplied RGBA; the protocol wants straight ARGB.
-    let mut data = Vec::with_capacity(pixmap.data().len());
-    for px in pixmap.data().chunks_exact(4) {
-        let alpha = px[3];
-        let straight = |c: u8| {
-            if alpha == 0 {
-                0
-            } else {
-                (c as u32 * 255 / alpha as u32).min(255) as u8
-            }
-        };
-        data.extend_from_slice(&[alpha, straight(px[0]), straight(px[1]), straight(px[2])]);
+    let rgba = snowflake_rgba(size);
+    let mut data = Vec::with_capacity(rgba.len());
+    for px in rgba.chunks_exact(4) {
+        data.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
     }
     Icon {
         width: size as i32,

@@ -13,6 +13,9 @@ mod windows;
 pub use self::windows::{http_get, WindowsBackend as PlatformBackend};
 
 #[cfg(unix)]
+mod tray_shared;
+
+#[cfg(unix)]
 #[allow(dead_code)] // only the update check calls it, and not every backend has one yet
 mod curl_http;
 #[cfg(unix)]
