@@ -203,6 +203,7 @@ pub fn build_segments(
     segments
 }
 
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows --dump uses it
 pub fn explain_occlusion(windows: &[WindowInfo], idx: usize) -> Vec<isize> {
     let win = &windows[idx];
     let left = win.rect.left as f32;

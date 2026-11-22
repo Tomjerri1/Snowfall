@@ -7,6 +7,8 @@ mod config;
 mod geometry;
 mod snow;
 mod sys;
+// The update check is driven by the settings window, which only the Windows backend has so far.
+#[cfg_attr(not(windows), allow(dead_code))]
 mod update;
 
 use geometry::{Accumulate, Monitor, Segment, WindowInfo};

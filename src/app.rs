@@ -2,6 +2,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
+// The update fields are only used by the Windows settings window so far.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct AppState {
     pub paused: AtomicBool,
     pub target_flakes: AtomicUsize,

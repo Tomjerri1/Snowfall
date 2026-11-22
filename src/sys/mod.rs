@@ -13,14 +13,17 @@ mod windows;
 pub use self::windows::{http_get, WindowsBackend as PlatformBackend};
 
 #[cfg(unix)]
+#[allow(dead_code)] // only the update check calls it, and not every backend has one yet
 mod curl_http;
 #[cfg(unix)]
 pub use curl_http::http_get;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod x11;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub use x11::X11Backend as PlatformBackend;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
 compile_error!("Snowfall has no platform backend for this OS yet");
 
 /// Opaque id of a top-level window. Positive values are real windows, negative ones are reserved for synthetic owners (see `snow::GROUND_ID`).
