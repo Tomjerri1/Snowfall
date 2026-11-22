@@ -4,13 +4,13 @@
 //! overlay can be transparent, and an EWMH-compliant window manager (`_NET_CLIENT_LIST_STACKING`).
 //! Only X11 clients are tracked: native Wayland windows are invisible to this backend.
 //!
-//! There is no tray icon or settings window yet. Settings are read from the config file at start,
-//! and `Ctrl+Alt+Q` quits.
+//! The tray icon (StatusNotifierItem over D-Bus) carries all settings in its menu; `Ctrl+Alt+Q` quits.
 
 mod conn;
 mod monitors;
 mod overlay;
 mod tracker;
+mod tray;
 
 use crate::app::AppState;
 use crate::geometry::{Monitor, WinRect, WindowInfo};
@@ -20,6 +20,7 @@ use overlay::Overlay;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracker::Tracker;
+use tray::SnowTray;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ConnectionExt as _, GrabMode, Keycode, ModMask};
 use x11rb::protocol::Event;
@@ -35,6 +36,7 @@ pub struct X11Backend {
     tracker: Tracker,
     quit_keycode: Option<Keycode>,
     quit: bool,
+    tray: Option<ksni::blocking::Handle<SnowTray>>,
     monitors: Mutex<Option<(Instant, Vec<Monitor>)>>,
 }
 
@@ -85,7 +87,7 @@ fn grab_ctrl_alt(c: &Conn, keycode: Keycode) {
 }
 
 impl Backend for X11Backend {
-    fn start(_state: Arc<AppState>) -> Self {
+    fn start(state: Arc<AppState>) -> Self {
         let c = Conn::connect().unwrap_or_else(|e| fatal(e));
         let overlay = Overlay::new(c.clone()).unwrap_or_else(|e| fatal(e));
         let tracker = Tracker::new(c.clone(), overlay.window()).unwrap_or_else(|e| fatal(e));
@@ -96,12 +98,15 @@ impl Backend for X11Backend {
             None => eprintln!("snowfall: no key for Q found, the Ctrl+Alt+Q hotkey is disabled"),
         }
 
+        let tray = tray::spawn(state);
+
         Self {
             c,
             overlay,
             tracker,
             quit_keycode,
             quit: false,
+            tray,
             monitors: Mutex::new(None),
         }
     }
@@ -203,5 +208,13 @@ impl Backend for X11Backend {
 
     fn dump_windows(&self) -> String {
         self.tracker.dump(&self.monitors())
+    }
+}
+
+impl Drop for X11Backend {
+    fn drop(&mut self) {
+        if let Some(tray) = self.tray.take() {
+            tray.shutdown().wait();
+        }
     }
 }
