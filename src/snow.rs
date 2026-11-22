@@ -8,7 +8,25 @@ use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Stroke, 
 pub const GROUND_ID: isize = -1;
 
 pub fn is_floor_like(owner: Option<isize>) -> bool {
-    owner.is_none() || owner == Some(GROUND_ID)
+    owner.is_none() || owner.is_some_and(|id| id < 0)
+}
+
+/// Owner id of the dock (taskbar-level floor) pile of monitor `i`. Monitor 0 keeps the legacy `None`.
+pub fn dock_owner(i: usize) -> Option<isize> {
+    if i == 0 {
+        None
+    } else {
+        Some(-(2 + 2 * i as isize))
+    }
+}
+
+/// Owner id of the ground (bottom edge) pile of monitor `i`. Monitor 0 keeps the legacy `GROUND_ID`.
+pub fn ground_owner(i: usize) -> Option<isize> {
+    if i == 0 {
+        Some(GROUND_ID)
+    } else {
+        Some(-(3 + 2 * i as isize))
+    }
 }
 
 const MAX_SLOPE: f32 = 2.2;
@@ -456,20 +474,28 @@ impl Snow {
             }
         }
 
-        let key = if let Some(hwnd) = found_hwnd {
-            Some(hwnd)
-        } else {
-            if self.piles.contains_key(&None) {
-                None
-            } else {
-                Some(GROUND_ID)
-            }
-        };
+        if let Some(hwnd) = found_hwnd {
+            return self
+                .piles
+                .get(&Some(hwnd))
+                .map(|pile| pile.heights.iter().cloned().fold(0.0f32, f32::max))
+                .unwrap_or(0.0);
+        }
 
-        if let Some(pile) = self.piles.get(&key) {
-            pile.heights.iter().cloned().fold(0.0f32, f32::max)
-        } else {
-            0.0
+        let mut best: Option<(f32, Option<isize>)> = None;
+        for (owner, data) in &self.owner_data {
+            if !is_floor_like(*owner) || cx < data.full_left || cx > data.full_right {
+                continue;
+            }
+            let dist = (data.y - cy).abs();
+            if best.is_none_or(|(d, _)| dist < d) {
+                best = Some((dist, *owner));
+            }
+        }
+
+        match best.and_then(|(_, owner)| self.piles.get(&owner)) {
+            Some(pile) => pile.heights.iter().cloned().fold(0.0f32, f32::max),
+            None => 0.0,
         }
     }
 
@@ -1942,11 +1968,10 @@ impl Snow {
     }
 
     pub fn draw(&self, pixmap: &mut PixmapMut, win_rects: &[(isize, tiny_skia::Rect)]) {
-        if let Some(pile) = self.piles.get(&None) {
-            self.draw_pile(pixmap, pile);
-        }
-        if let Some(pile) = self.piles.get(&Some(GROUND_ID)) {
-            self.draw_pile(pixmap, pile);
+        for (owner, pile) in &self.piles {
+            if is_floor_like(*owner) {
+                self.draw_pile(pixmap, pile);
+            }
         }
 
         for &(hwnd, ref rect) in win_rects.iter().rev() {
@@ -2074,6 +2099,8 @@ mod tests {
         assert!(is_floor_like(None));
         assert!(is_floor_like(Some(GROUND_ID)));
         assert!(!is_floor_like(Some(42)));
+        assert!(is_floor_like(Some(-4)));
+        assert!(is_floor_like(dock_owner(2)));
     }
 
     #[test]
